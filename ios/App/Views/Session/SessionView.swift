@@ -15,6 +15,9 @@ struct SessionView: View {
     /// Width of the inner display's side status bar. The pane sits inside it, so it has to
     /// slide this much further than its own width to leave the screen.
     @State private var trailingInset: CGFloat = 0
+    @State private var width: CGFloat = 0
+    /// See `transcriptGlide`.
+    @State private var glide: CGFloat = 0
 
     private static let paneWidth: CGFloat = 400
     private static let slide = Animation.smooth(duration: 0.28)
@@ -26,6 +29,8 @@ struct SessionView: View {
                 ZStack(alignment: .trailing) {
                     ConversationView(model: model, sessionId: sessionId)
                         .padding(.trailing, reserved ? Self.paneWidth : 0)
+                        .environment(\.paneReserved, reserved)
+                        .environment(\.transcriptGlide, glide)
                         // Rows restyle for the selection in place; they don't animate their frames
                         // across the reflow when the pane opens.
                         .transaction(value: inspected?.id) { $0.animation = nil }
@@ -37,6 +42,7 @@ struct SessionView: View {
                     }
                 }
                 .onGeometryChange(for: CGFloat.self, of: \.safeAreaInsets.trailing) { trailingInset = $0 }
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
                 .environment(\.inspector, inspecting ? Inspector(selectedId: inspected?.id, open: open) : nil)
             } else {
                 ProgressView()
@@ -83,9 +89,19 @@ struct SessionView: View {
         withAnimation(Self.slide) {
             inspected = nil
         } completion: {
-            // The chat widens only once the pane is gone, behind nothing.
-            if inspected == nil { reserved = false }
+            // Once the pane is gone the chat takes the full width. Its text widens in place from the
+            // same left edge, then glides to the centre if the wider column is centred.
+            guard inspected == nil else { return }
+            glide = Self.textLeft(in: width - Self.paneWidth) - Self.textLeft(in: width)
+            withAnimation(Self.slide) { reserved = false }
+            Task { withAnimation(Self.slide) { glide = 0 } }
         }
+    }
+
+    /// Where the transcript's text starts in a chat area this wide: a centred column of at most
+    /// 780 points with 16 points either side (see TranscriptView).
+    private static func textLeft(in width: CGFloat) -> CGFloat {
+        (width - min(812, width)) / 2 + 16
     }
 
     @ToolbarContentBuilder

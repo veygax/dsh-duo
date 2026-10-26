@@ -1,13 +1,24 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Room is kept on the right for the side pane.
+    @Entry var paneReserved = false
+    /// Horizontal offset of the transcript text while it glides back to centre after the pane closes.
+    @Entry var transcriptGlide: CGFloat = 0
+}
+
 /// Transcript with the composer and any open questions pinned beneath it.
 struct ConversationView: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.paneReserved) private var paneReserved
     let model: SessionModel
     let sessionId: String
 
     var body: some View {
         TranscriptView(model: model, session: store.sessions[sessionId])
+            // The transcript takes its new width in one step. Animated, its rows rewrap shorter
+            // while the scroll offset lags, scrolling it past its end until it snaps back.
+            .transaction(value: paneReserved) { $0.animation = nil }
             // A bar, not a plain inset: content scrolling beneath it gets the system scroll edge effect.
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 // One container renders the question cards, command list and composer together
@@ -29,17 +40,22 @@ struct ConversationView: View {
 
 struct TranscriptView: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.paneReserved) private var paneReserved
+    @Environment(\.transcriptGlide) private var glide
     @Environment(\.layoutEpoch) private var layoutEpoch
     let model: SessionModel
     let session: SessionInfo?
     /// The lazy stack can keep a scroll offset into rows it has not measured at the new width,
     /// showing an empty transcript. After the window resizes, rebuild it, anchored at the end.
     @State private var generation = 0
-    /// The row at the top of the screen, tracked live by the scroll view.
+    /// The first row on screen. Observed, not bound: a bound scroll position pins that row while the
+    /// width changes and fights the bottom anchor, leaving the transcript scrolled past its end.
     @State private var topId: String?
     /// Where the user left off. Only their own scrolling updates it, so a resize, a rebuild or a
     /// reconnect can't move it; a rebuild puts them back here. Not observed, so it never re-renders.
     @State private var reading = Reading()
+
+    private static let end = "transcript-end"
 
     private final class Reading {
         var atBottom = true
@@ -47,6 +63,7 @@ struct TranscriptView: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 if model.loading {
@@ -80,15 +97,18 @@ struct TranscriptView: View {
                     WorkingIndicator()
                         .id("working")
                 }
+
+                Color.clear.frame(height: 0).id(Self.end)
             }
             .scrollTargetLayout()
             .frame(maxWidth: 780)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
+            .offset(x: glide)
         }
         .id(generation)
-        .scrollPosition(id: $topId, anchor: .top)
+        .onScrollTargetVisibilityChange(idType: String.self) { topId = $0.first }
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .onScrollPhaseChange { old, new, context in
@@ -98,9 +118,15 @@ struct TranscriptView: View {
             reading.topId = topId
         }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: paneReserved) {
+            // Rewrapping changes the transcript's height; keep the end in view if that's where the user was.
+            if reading.atBottom { Task { proxy.scrollTo(Self.end, anchor: .bottom) } }
+        }
         .onChange(of: layoutEpoch) {
             generation += 1
-            topId = reading.atBottom ? nil : reading.topId
+            guard !reading.atBottom, let id = reading.topId else { return }
+            Task { proxy.scrollTo(id, anchor: .top) }
+        }
         }
     }
 }
