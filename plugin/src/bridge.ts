@@ -10,7 +10,8 @@ import { dirname, join } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
 import { Directory, type QuestionView, type SessionView } from './directory.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent, HostContext } from './host.ts'
-import { loadPairing, pairingLink, pairingPath, pairingQr, savePairing, type Pairing } from './pairing.ts'
+import { loadPairing, pairingLink, pairingPath, pairingSvg, rotatePairing, savePairing, type Pairing } from './pairing.ts'
+import { Phones } from './phones.ts'
 import { RelayLink } from './relay.ts'
 import { ApnsSender, DeviceTokens, http2Transport, loadApns, type ApnsTransport, type PushMessage } from './push.ts'
 import { Remote, RemoteFailure, failureOf } from './remote.ts'
@@ -99,6 +100,7 @@ export class Bridge {
   private link: RelayLink | undefined
   private readonly disposers: (() => unknown)[] = []
   private tokens!: DeviceTokens
+  private phones!: Phones
   private apns: ApnsSender | undefined
   private transport: ApnsTransport | undefined
 
@@ -129,6 +131,8 @@ export class Bridge {
     this.sealer = new Sealer(Buffer.from(this.pairing.secret, 'base64url'))
     this.tokens = new DeviceTokens(join(dirname(this.pairingFile), 'devices.json'))
     await this.tokens.load()
+    this.phones = new Phones(join(dirname(this.pairingFile), 'phones.json'))
+    await this.phones.load()
     this.transport = this.config.apnsTransport ?? http2Transport()
     try {
       this.apns = await loadApns(this.apnsFile, this.transport)
@@ -137,17 +141,70 @@ export class Bridge {
     }
     if (this.apns !== undefined) this.log.info(`duo: push notifications on (${this.apns.topic})`)
     this.listen()
-    this.link = new RelayLink({
+    this.connect()
+    void this.directory.ready().catch((error: unknown) => this.log.warn(`duo: session list unavailable: ${String(error)}`))
+  }
+
+  /** (Re)join the relay room named by the current pairing. */
+  private connect(): void {
+    this.link?.stop()
+    this.sealer = new Sealer(Buffer.from(this.pairing.secret, 'base64url'))
+    const link = new RelayLink({
       relay: this.pairing.relay,
       roomId: this.pairing.roomId,
       auth: relayAuth(Buffer.from(this.pairing.secret, 'base64url')),
-      onMessage: (from, sealed) => { void this.receive(from, sealed) },
-      onDevice: (id, online) => this.onDevice(id, online),
+      onMessage: (from, sealed) => { if (this.link === link) void this.receive(from, sealed) },
+      onDevice: (id, online) => { if (this.link === link) this.onDevice(id, online) },
       log: this.log,
     })
-    this.link.start()
-    void this.directory.ready().catch((error: unknown) => this.log.warn(`duo: session list unavailable: ${String(error)}`))
-    if (this.pairing.paired !== true) await this.printPairing()
+    this.link = link
+    link.start()
+  }
+
+  /**
+   * Replace the room secret: every phone loses access at once and must scan the
+   * new code. Their push tokens and records go with it.
+   */
+  async unpairAll(): Promise<void> {
+    for (const follow of this.follows.values()) follow.controller.abort()
+    this.follows.clear()
+    this.opened.clear()
+    this.pairing = await rotatePairing(this.pairingFile, this.config.relay)
+    await this.tokens.clear()
+    this.phones.clear()
+    this.connect()
+    this.log.info('duo: pairing reset; every phone was unpaired')
+  }
+
+  /** The pairing link and its QR code as SVG, for the iPhone page. */
+  async pairingCode(): Promise<{ link: string; svg: string }> {
+    const link = pairingLink(this.pairing, this.config.hostName)
+    return { link, svg: await pairingSvg(link) }
+  }
+
+  /** Everything the iPhone page shows. */
+  overview() {
+    const online = this.link?.devices ?? new Set<string>()
+    const pushed = new Set(this.tokens.entries().map(([id]) => id))
+    return {
+      hostName: this.config.hostName,
+      relay: this.pairing.relay,
+      relayConnected: this.link?.connected === true,
+      push: this.apns === undefined
+        ? { enabled: false as const, file: this.apnsFile }
+        : { enabled: true as const, topic: this.apns.topic },
+      phones: this.phones.entries()
+        .map(([id, record]) => ({
+          id,
+          name: record.name ?? 'iPhone',
+          model: record.model ?? 'iPhone',
+          online: online.has(id),
+          lastSeen: record.lastSeen,
+          firstSeen: record.firstSeen,
+          notifications: pushed.has(id),
+        }))
+        .sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeen - a.lastSeen),
+    }
   }
 
   async stop(): Promise<void> {
@@ -162,19 +219,13 @@ export class Bridge {
     await this.remote.dispose().catch(() => undefined)
   }
 
-  async printPairing(): Promise<void> {
-    const link = pairingLink(this.pairing, this.config.hostName)
-    const qr = await pairingQr(link)
-    process.stdout.write(`\nDSH Duo: scan with the iPhone app to pair this dsh (relay ${this.pairing.relay})\n${qr}\n`)
-  }
-
   status(): string {
     const devices = this.link?.devices.size ?? 0
     return [
       `Relay: ${this.pairing.relay} (${this.link?.connected === true ? 'connected' : 'offline'})`,
       `Phones online: ${devices}`,
       `Paired before: ${this.pairing.paired === true ? 'yes' : 'no'}`,
-      `Push: ${this.apns === undefined ? `off (run ios/scripts/install.sh with an APNs key; reads ${this.apnsFile})` : `on (${this.apns.topic}, ${this.tokens.entries().length} phone(s))`}`,
+      `Notifications when the app is closed: ${this.apns === undefined ? 'off (sign the app with ios/scripts/install.sh --apns-key)' : `on (${this.apns.topic})`}`,
       `Pairing file: ${this.pairingFile}`,
     ].join('\n')
   }
@@ -319,6 +370,7 @@ export class Bridge {
   // ── Devices ────────────────────────────────────────────────────────────
 
   private onDevice(id: string, online: boolean): void {
+    this.phones.seen(id)
     if (online) {
       if (this.pairing.paired !== true) {
         this.pairing = { ...this.pairing, paired: true }
@@ -385,6 +437,11 @@ export class Bridge {
   private async handle(device: string, op: string, m: Json): Promise<unknown> {
     switch (op) {
       case 'hello': {
+        const details = obj(m.device)
+        this.phones.seen(device, {
+          ...typeof details?.name === 'string' ? { name: details.name } : {},
+          ...typeof details?.model === 'string' ? { model: details.model } : {},
+        })
         await this.directory.ready()
         const [presets] = await Promise.all([this.presets()])
         return {

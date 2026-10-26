@@ -20,6 +20,8 @@ const port = 20_000 + Math.floor(Math.random() * 20_000)
 const relay = process.env.DUO_RELAY ?? `http://127.0.0.1:${port}`
 let server: ChildProcess | undefined
 let home: string
+const manifests: unknown[] = []
+const services = new Map<string, unknown>()
 const pushes: Array<{ env: string; token: string; headers: Record<string, string>; body: string }> = []
 
 /** Async queue used to feed stream frames from the test. */
@@ -55,6 +57,8 @@ class Feed<T> implements AsyncIterable<T> {
 }
 
 const calls: InvokeRemoteRequest[] = []
+/** The Host activates its Session service after the plugin applies; the first list loses that race. */
+let sessionListFailures = 1
 const listeners = new Map<string, Array<(...args: never[]) => unknown>>()
 const followFeed = new Feed<Record<string, unknown>>()
 const commands: Array<{ name: string }> = []
@@ -86,7 +90,14 @@ const ctx: HostContext = {
       calls.push(request)
       const endpoint = `${request.namespace}/${request.method}`
       switch (endpoint) {
-        case 'session/list': return { items: [summary] }
+        case 'session/list':
+          if (sessionListFailures-- > 0) {
+            throw Object.assign(
+              new Error('typert gateway: session/list: active Service "sessionController" is unavailable'),
+              { code: 'gateway/service-unavailable' },
+            )
+          }
+          return { items: [summary] }
         case 'agentPresets/list': return { presets: [
           { id: 'standard', name: 'Standard', isDefault: true }, { id: 'ptc', name: 'PTC' },
           { id: 'minimal', name: 'Minimal' }, { id: 'cordis', name: 'Creator' },
@@ -132,8 +143,13 @@ const ctx: HostContext = {
   logger: { info: () => {}, warn: () => {} },
   get: ((name: string) => {
     if (name === 'profileContext') return { home }
+    if (name === 'typert') return { register: (manifest: unknown) => { manifests.push(manifest); return () => {} } }
     return undefined
   }) as HostContext['get'],
+  provide(name: string, value: unknown) {
+    services.set(name, value)
+    return () => services.delete(name)
+  },
   on(event, listener) {
     const list = listeners.get(event) ?? []
     list.push(listener)
@@ -251,6 +267,9 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.equal(value.sessions[0]!.title, 'Fix the login bug')
   assert.deepEqual(value.sessions[0]!.model, { provider: 'deepseek', model: 'deepseek-v4', effort: 'high' })
 
+  // The first list lost the activation race; the plugin retried it instead of caching the error.
+  assert.equal(calls.filter(call => call.namespace === 'session' && call.method === 'list').length, 2)
+
   // Session list request used the fallback wire name.
   assert.deepEqual(calls.find(call => call.method === 'list' && call.namespace === 'session')?.args, { _request: {} })
 
@@ -349,4 +368,51 @@ test('a disconnected phone gets an encrypted push from this Mac, not the relay',
   // The working environment is remembered for the next push.
   const devices = JSON.parse(await readFile(join(home, 'duo-remote', 'devices.json'), 'utf8')) as Record<string, { env: string }>
   assert.equal(devices['iphone-duo-1']!.env, 'production')
+})
+
+test('the iPhone page shows phones, the pairing code, and unpairs everyone', async () => {
+  const panel = services.get('duoRemote') as {
+    overview(): Promise<{ phones: Array<{ id: string; name: string; online: boolean; notifications: boolean }>; push: { enabled: boolean }; relayConnected: boolean }>
+    pairingCode(): Promise<{ link: string; svg: string }>
+    unpairAll(): Promise<{ phones: unknown[] }>
+    typertRemote: { service: unknown; serviceKey: string; namespace: string }
+  }
+  assert.ok(panel, 'duoRemote service provided')
+  assert.equal(panel.typertRemote.service, panel)
+  assert.equal(panel.typertRemote.serviceKey, 'duoRemote')
+  assert.deepEqual((manifests[0] as { invocations: Array<{ method: string }> }).invocations.map(item => item.method),
+    ['overview', 'pairingCode', 'unpairAll'])
+
+  const overview = await panel.overview()
+  assert.equal(overview.push.enabled, true)
+  assert.equal(overview.relayConnected, true)
+  const phone = overview.phones.find(item => item.id === 'iphone-duo-1')
+  assert.ok(phone, 'the phone that said hello is listed')
+  assert.equal(phone.name, 'Test')
+  assert.equal(phone.notifications, true)
+
+  const before = JSON.parse(await readFile(join(home, 'duo-remote', 'pairing.json'), 'utf8')) as { roomId: string; secret: string }
+  const code = await panel.pairingCode()
+  assert.match(code.link, /^dshduo:\/\/pair\?v=1&r=/)
+  assert.ok(code.link.includes(`i=${before.roomId}`))
+  assert.match(code.svg, /^<svg[\s\S]*<\/svg>\s*$/)
+
+  const after = await panel.unpairAll()
+  assert.deepEqual(after.phones, [])
+  const rotated = JSON.parse(await readFile(join(home, 'duo-remote', 'pairing.json'), 'utf8')) as { roomId: string; secret: string }
+  assert.notEqual(rotated.roomId, before.roomId)
+  assert.notEqual(rotated.secret, before.secret)
+  assert.deepEqual(JSON.parse(await readFile(join(home, 'duo-remote', 'devices.json'), 'utf8')), {})
+
+  // The old credentials no longer open anything; the new room works.
+  const stale = new WebSocket(socketUrl(relay, before.roomId, { role: 'device', auth: relayAuth(Buffer.from(before.secret, 'base64url')), device: 'iphone-duo-1' }))
+  const staleMessages: string[] = []
+  stale.addEventListener('message', event => staleMessages.push(String(event.data)))
+  await new Promise(resolve => setTimeout(resolve, 800))
+  assert.ok(staleMessages.every(text => !text.includes('"online":true')), 'old room has no host')
+  stale.close()
+  const fresh = await connectPhone()
+  const hello = await fresh.call('hello', { device: { name: 'New phone', model: 'iPhone' } })
+  assert.equal(hello.ok, true)
+  fresh.ws.close()
 })

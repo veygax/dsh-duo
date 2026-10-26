@@ -109,7 +109,12 @@ session('s-login', 'Fix flaky login test', '/Users/dev/Code/webapp', 4, 'standar
 session('s-api', 'Add pagination to /orders API', '/Users/dev/Code/webapp', 52, 'ptc', [
   ev('turn/start', { turn: 1 }),
   user('Add cursor pagination to GET /orders'),
-  assistant(1, [{ type: 'text', text: 'Done: `GET /orders?cursor=…&limit=50` now returns `{ items, nextCursor }`. Tests updated.' }]),
+  assistant(1, [
+    { type: 'reasoning', text: 'Cursor pagination: encode the last id and created_at so pages stay stable while orders are inserted.' },
+    { type: 'tool-call', id: 'c-api-1', name: 'edit', arguments: '{"path":"src/routes/orders.ts"}' },
+  ]),
+  result(1, 'c-api-1', 'Updated src/routes/orders.ts (+42 −7)'),
+  assistant(1, [{ type: 'text', text: 'Done: `GET /orders?cursor=…&limit=50` now returns `{ items, nextCursor }`.\n\n| Endpoint | Before | After |\n|:--|--:|:-:|\n| `GET /orders` | 1.8 s | 120 ms |\n| `GET /orders?status=open` | 950 ms | 85 ms |\n| Page size | all rows | 50 |\n\nTests updated.' }]),
   ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
 ])
 session('s-plugin', 'Build a standup summary page', '/Users/dev/Code/dsh-plugins', 180, 'cordis', [

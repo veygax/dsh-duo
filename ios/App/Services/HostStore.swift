@@ -31,7 +31,6 @@ final class HostStore {
 
     /// Split view selection; also drives which Session counts as "visible" for notifications.
     var selectedSessionId: String?
-    var columnVisibility: NavigationSplitViewVisibility = .automatic
     /// Transient message shown at the top of the window.
     var banner: Banner?
     var isActive = true
@@ -52,7 +51,6 @@ final class HostStore {
     }
 
     var hostName: String { pairing?.hostName ?? "dsh" }
-    var isFocused: Bool { columnVisibility == .detailOnly }
 
     // MARK: Pairing and connection
 
@@ -282,9 +280,24 @@ final class HostStore {
         }
     }
 
-    func close(_ model: SessionModel) {
-        guard let client, client.hostOnline else { return }
-        Task { _ = try? await client.request("session.close", ["sessionId": model.id]) }
+    /// Screens showing each Session. Folding or unfolding rebuilds the screen, and the new one
+    /// can appear before the old one disappears, so the Host is told to stop only when none is left.
+    private var viewers: [String: Int] = [:]
+
+    func attach(_ model: SessionModel) {
+        viewers[model.id, default: 0] += 1
+    }
+
+    func detach(_ model: SessionModel) {
+        let count = (viewers[model.id] ?? 1) - 1
+        viewers[model.id] = count > 0 ? count : nil
+        guard count <= 0 else { return }
+        Task {
+            // Give a replacement screen a moment to attach before unsubscribing.
+            try? await Task.sleep(for: .seconds(1))
+            guard viewers[model.id] == nil, let client, client.hostOnline else { return }
+            _ = try? await client.request("session.close", ["sessionId": model.id])
+        }
     }
 
     func loadCommands(for model: SessionModel) async {
@@ -427,12 +440,5 @@ final class HostStore {
     func show(_ error: Error) {
         let message = (error as? RemoteError)?.message ?? error.localizedDescription
         banner = Banner(title: "Something went wrong", message: message, isError: true)
-    }
-
-    func toggleFocus() {
-        Haptics.tap()
-        withAnimation(.snappy) {
-            columnVisibility = isFocused ? .automatic : .detailOnly
-        }
     }
 }

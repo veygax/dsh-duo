@@ -9,7 +9,7 @@ struct ItemView: View {
         case .text:
             MarkdownText(item.text ?? "")
                 .contextMenu { CopyButton(text: item.text ?? "") }
-        case .thinking: ThinkingView(text: item.text ?? "", live: false)
+        case .thinking: ThinkingView(id: item.id, text: item.text ?? "", live: false)
         case .tool: ToolCallView(item: item)
         case .notice: NoticeView(item: item)
         case .turn: TurnDivider(reason: item.reason ?? "completed")
@@ -53,15 +53,33 @@ struct UserBubble: View {
     }
 }
 
+/// In full screen on the open inner display, thoughts and tool calls open in the side pane
+/// instead of expanding inline. The pane's owner supplies this; elsewhere it is nil.
+struct Inspector {
+    var selectedId: String?
+    var open: (TranscriptItem) -> Void
+}
+
+extension EnvironmentValues {
+    @Entry var inspector: Inspector?
+}
+
 struct ThinkingView: View {
+    @Environment(\.inspector) private var inspector
+    let id: String
     let text: String
     let live: Bool
     @State private var expanded: Bool?
 
     var body: some View {
-        let isExpanded = expanded ?? live
+        let isExpanded = inspector == nil && (expanded ?? live)
+        let selected = inspector?.selectedId == id
         VStack(alignment: .leading, spacing: 8) {
             Button {
+                if let inspector {
+                    inspector.open(TranscriptItem(id: id, kind: .thinking, time: 0, text: text))
+                    return
+                }
                 Haptics.tap()
                 withAnimation(.snappy) { expanded = !isExpanded }
             } label: {
@@ -81,12 +99,16 @@ struct ThinkingView: View {
                         .font(.caption.weight(.semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .padding(.vertical, inspector == nil ? 0 : 8)
+                .padding(.horizontal, inspector == nil ? 0 : 10)
+                .background(selected ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 10))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(live ? "Thinking" : "Thought process")
-            .accessibilityHint(isExpanded ? "Collapses the reasoning" : "Shows the reasoning")
+            .accessibilityHint(inspector != nil ? "Shows the reasoning beside the chat" : isExpanded ? "Collapses the reasoning" : "Shows the reasoning")
+            .accessibilityAddTraits(selected ? .isSelected : [])
 
             if isExpanded {
                 Text(text)
@@ -149,12 +171,18 @@ enum ToolPresentation {
 }
 
 struct ToolCallView: View {
+    @Environment(\.inspector) private var inspector
     let item: TranscriptItem
     @State private var expanded = false
 
     var body: some View {
+        let selected = inspector?.selectedId == item.id
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                if let inspector {
+                    inspector.open(item)
+                    return
+                }
                 Haptics.tap()
                 withAnimation(.snappy) { expanded.toggle() }
             } label: {
@@ -186,27 +214,19 @@ struct ToolCallView: View {
             }
             .buttonStyle(.plain)
 
-            if expanded {
+            if expanded && inspector == nil {
                 Divider()
-                VStack(alignment: .leading, spacing: 10) {
-                    if let args = item.args, !args.isEmpty {
-                        CodeBlock(code: ToolPresentation.prettyJSON(args), language: "input")
-                    }
-                    if let result = item.result, !result.isEmpty {
-                        CodeBlock(code: result, language: item.isFailedTool ? "error" : "output")
-                    } else if item.isRunningTool {
-                        Label("Running…", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(12)
-                .transition(.opacity)
+                ToolDetail(item: item)
+                    .padding(12)
+                    .transition(.opacity)
             }
         }
-        .background(.fill.quaternary, in: .rect(cornerRadius: 14))
+        .background(selected ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(.fill.quaternary), in: .rect(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(item.isFailedTool ? Color.red.opacity(0.4) : .clear)
+                .strokeBorder(selected ? Color.accentColor.opacity(0.6) : item.isFailedTool ? Color.red.opacity(0.4) : .clear)
         }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityElement(children: .contain)
     }
 
@@ -219,6 +239,24 @@ struct ToolCallView: View {
             Image(systemName: "xmark.circle.fill").foregroundStyle(.red).accessibilityLabel("Failed")
         default:
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel("Done")
+        }
+    }
+}
+
+/// A tool call's input and output.
+struct ToolDetail: View {
+    let item: TranscriptItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let args = item.args, !args.isEmpty {
+                CodeBlock(code: ToolPresentation.prettyJSON(args), language: "input")
+            }
+            if let result = item.result, !result.isEmpty {
+                CodeBlock(code: result, language: item.isFailedTool ? "error" : "output")
+            } else if item.isRunningTool {
+                Label("Running…", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }

@@ -38,14 +38,14 @@ struct SidebarView: View {
                             }
                     }
                     if section.sessions.isEmpty, let workspace = section.workspace {
-                        Button(action: tap { newSessionWorkspace = .init(workspaceId: workspace.id) }) {
+                        Button(action: tap { quickStart(in: workspace.id) }) {
                             Label("Start a session", systemImage: "plus.bubble")
                                 .foregroundStyle(.secondary)
                         }
                     }
                 } header: {
                     WorkspaceHeader(workspace: section.workspace) {
-                        newSessionWorkspace = .init(workspaceId: section.workspace?.id)
+                        quickStart(in: section.workspace?.id)
                     }
                 }
             }
@@ -80,12 +80,23 @@ struct SidebarView: View {
         .sheet(item: $renaming) { session in RenameSheet(session: session) }
     }
 
+    /// Start a session in this folder right away, in the last mode used; the full chooser
+    /// stays behind the toolbar's New Session button.
+    private func quickStart(in workspaceId: String?, cwd: String? = nil) {
+        Task {
+            let mode = UserDefaults.standard.string(forKey: "lastMode")
+            if let id = await store.createSession(workspaceId: workspaceId, cwd: cwd, mode: mode) {
+                store.selectedSessionId = id
+            }
+        }
+    }
+
     @ViewBuilder
     private func rowMenu(_ session: SessionInfo) -> some View {
         Button("Open", systemImage: "arrow.up.forward", action: tap { store.selectedSessionId = session.id })
         Button("Rename", systemImage: "pencil", action: tap { renaming = session })
         Button("New Session Here", systemImage: "plus.bubble", action: tap {
-            newSessionWorkspace = .init(workspaceId: session.workspaceId)
+            quickStart(in: session.workspaceId, cwd: session.cwd)
         })
         if let cwd = session.cwd {
             Button("Copy Folder Path", systemImage: "doc.on.doc", action: tap { UIPasteboard.general.string = cwd })

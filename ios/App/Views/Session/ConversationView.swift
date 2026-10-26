@@ -29,8 +29,22 @@ struct ConversationView: View {
 
 struct TranscriptView: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.layoutEpoch) private var layoutEpoch
     let model: SessionModel
     let session: SessionInfo?
+    /// The lazy stack can keep a scroll offset into rows it has not measured at the new width,
+    /// showing an empty transcript. After the window resizes, rebuild it, anchored at the end.
+    @State private var generation = 0
+    /// The row at the top of the screen, tracked live by the scroll view.
+    @State private var topId: String?
+    /// Where the user left off. Only their own scrolling updates it, so a resize, a rebuild or a
+    /// reconnect can't move it; a rebuild puts them back here. Not observed, so it never re-renders.
+    @State private var reading = Reading()
+
+    private final class Reading {
+        var atBottom = true
+        var topId: String?
+    }
 
     var body: some View {
         ScrollView {
@@ -67,14 +81,27 @@ struct TranscriptView: View {
                         .id("working")
                 }
             }
+            .scrollTargetLayout()
             .frame(maxWidth: 780)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
         }
+        .id(generation)
+        .scrollPosition(id: $topId, anchor: .top)
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .onScrollPhaseChange { old, new, context in
+            guard new == .idle, old != .idle else { return }
+            let geometry = context.geometry
+            reading.atBottom = geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 40
+            reading.topId = topId
+        }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: layoutEpoch) {
+            generation += 1
+            topId = reading.atBottom ? nil : reading.topId
+        }
     }
 }
 
@@ -146,7 +173,7 @@ struct LiveAttemptView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if !live.thinking.isEmpty {
-                ThinkingView(text: live.thinking, live: live.text.isEmpty && live.tools.isEmpty)
+                ThinkingView(id: DetailPane.liveThinkingId, text: live.thinking, live: live.text.isEmpty && live.tools.isEmpty)
             }
             if !live.text.isEmpty {
                 MarkdownText(live.text)

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00866AF08AD74C9EE6BE79B0 /* FoldAware.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26731E78B69D81424C13753A /* FoldAware.swift */; };
+		0241E20B145FA11ABC3ACE83 /* DetailPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65F6BB29DAD01D9463DA88BA /* DetailPane.swift */; };
 		04F0449ACA8842D2E76DB5DE /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77894D5E9ECF92819C08704F /* Notifier.swift */; };
 		0DADEB89DCC22902DDB9B2EA /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E71C2244D2F3864E54DB6C /* QRScannerView.swift */; };
 		0E03724D3EF9DC847B02DF86 /* DSHDuoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E363B98AD549BF178BD929 /* DSHDuoApp.swift */; };
@@ -15,7 +16,6 @@
 		1EE7CE58C9F24C6E4C6EED13 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCEA930A7B1ED75196A172AD /* ConversationView.swift */; };
 		254C09D10AFC9EC601CBB810 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = F6ACA182D9C68A5317907153 /* AppIcon.icon */; };
 		3228B3853B228943B75D3F80 /* DuoCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED92AE61B24458488741F75D /* DuoCrypto.swift */; };
-		3575F6244D6979C2A6273B7B /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF0D799EBE264A9ABE84608 /* InspectorView.swift */; };
 		3914D7496D121C18D6027BC2 /* DSHDuoNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D6CC76C18373C0747D4EFE25 /* DSHDuoNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		39351F61912BC2FFBA76C814 /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398F723FF55C9BCFBBE97519 /* PairingStore.swift */; };
 		43FC4A48B8F4D08272381431 /* ItemViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4614BDF2C92334DC5EC9D83 /* ItemViews.swift */; };
@@ -92,8 +92,8 @@
 		4B74445D300D24A18D8F4157 /* DSHDuo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DSHDuo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E46FE1DF6D31195F57F2F6C /* AddWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddWorkspaceSheet.swift; sourceTree = "<group>"; };
 		57F83951A91E7178FE4F4FE7 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
-		5BF0D799EBE264A9ABE84608 /* InspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
 		611277FC78C164DF9FE429E7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		65F6BB29DAD01D9463DA88BA /* DetailPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPane.swift; sourceTree = "<group>"; };
 		7167FE20E3402F1EA60CBF1E /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		77894D5E9ECF92819C08704F /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		77EA4FDE575A162AD00B83C7 /* SessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionView.swift; sourceTree = "<group>"; };
@@ -193,7 +193,7 @@
 			children = (
 				57F83951A91E7178FE4F4FE7 /* ComposerView.swift */,
 				DCEA930A7B1ED75196A172AD /* ConversationView.swift */,
-				5BF0D799EBE264A9ABE84608 /* InspectorView.swift */,
+				65F6BB29DAD01D9463DA88BA /* DetailPane.swift */,
 				C4614BDF2C92334DC5EC9D83 /* ItemViews.swift */,
 				CA2AA36F597155780941DBEF /* MarkdownText.swift */,
 				A6A5D605C2EC1AF5105D8B98 /* Menus.swift */,
@@ -396,11 +396,11 @@
 				725FAE287017D43758FB631F /* ComposerView.swift in Sources */,
 				1EE7CE58C9F24C6E4C6EED13 /* ConversationView.swift in Sources */,
 				0E03724D3EF9DC847B02DF86 /* DSHDuoApp.swift in Sources */,
+				0241E20B145FA11ABC3ACE83 /* DetailPane.swift in Sources */,
 				3228B3853B228943B75D3F80 /* DuoCrypto.swift in Sources */,
 				00866AF08AD74C9EE6BE79B0 /* FoldAware.swift in Sources */,
 				FC732131553EE35AB75BB41B /* Haptics.swift in Sources */,
 				EF8397EC0DD99F1BC88E9573 /* HostStore.swift in Sources */,
-				3575F6244D6979C2A6273B7B /* InspectorView.swift in Sources */,
 				43FC4A48B8F4D08272381431 /* ItemViews.swift in Sources */,
 				91B7B7384A2ED12407DF97ED /* JSONValue.swift in Sources */,
 				FAE819E8E132A488BA1F1C1D /* MarkdownText.swift in Sources */,

@@ -4,26 +4,54 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "keywords": ["dsh-plugin", "deepseek-harness", "iphone", "remote"],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "iphone",
+    "remote"
+  ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "bin": { "dsh-duo": "lib/cli.js" },
-  "exports": {
-    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
-    "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+  "bin": {
+    "dsh-duo": "lib/cli.js"
   },
-  "files": ["lib/**/*.js", "lib/**/*.d.ts", "cordis.patch.yml", "icon.svg", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./client": "./lib/client.js"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md"
+  ],
   "icon": "./icon.svg",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml",
       "listedByDefault": true
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && chmod +x lib/cli.js",
+    "build": "tsc -p tsconfig.build.json && cp client/client.js lib/client.js && chmod +x lib/cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.ts",
     "prepack": "npm run build"

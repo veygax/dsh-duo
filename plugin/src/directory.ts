@@ -109,6 +109,13 @@ export interface DirectoryEvents {
   questions(sessionId: string, questions: QuestionView[]): void
 }
 
+/**
+ * Delays before each retry of the first `session/list`. The Host activates the
+ * Session service that answers it a moment after this plugin applies, and the
+ * whole window stays under four seconds so a phone request cannot hang.
+ */
+const BASELINE_RETRY_MS = [50, 100, 200, 400, 800, 1600] as const
+
 export class Directory {
   private readonly entries = new Map<string, Entry>()
   private workspaceList: WorkspaceView[] = []
@@ -129,16 +136,39 @@ export class Directory {
     this.warn = warn
   }
 
-  /** Load the initial list once and keep the two streams running until `signal` aborts. */
+  /**
+   * Load the initial list once and keep the two streams running until `signal` aborts.
+   *
+   * A failed attempt is not cached. This plugin applies before the Host activates
+   * the Session service that answers `session/list`, and the Gateway rejects such
+   * a call outright; caching that rejection would answer every later phone
+   * request with one stale error.
+   */
   ready(): Promise<void> {
-    this.loaded ??= this.start()
-    return this.loaded
+    const loaded = this.loaded ??= this.start()
+    loaded.catch(() => { if (this.loaded === loaded) this.loaded = undefined })
+    return loaded
   }
 
   private async start(): Promise<void> {
-    await this.refresh()
+    await this.baseline()
     void this.follow('session/control', frame => this.onControl(frame))
     void this.follow('workspace/follow', frame => this.onWorkspace(frame))
+  }
+
+  /** Read the first list through the Host's activation window, before the follow streams begin. */
+  private async baseline(): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.refresh()
+        return
+      } catch (error) {
+        const delay = BASELINE_RETRY_MS[attempt]
+        if (delay === undefined || this.signal.aborted) throw error
+        await pause(delay, this.signal)
+        if (this.signal.aborted) throw error
+      }
+    }
   }
 
   async refresh(): Promise<void> {
@@ -334,4 +364,19 @@ export class Directory {
   workspaces(): WorkspaceView[] {
     return this.workspaceList.map(workspace => ({ ...workspace, sessionIds: [...workspace.sessionIds] }))
   }
+}
+
+/** Resolve after `ms`, or at once when `signal` aborts. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  const { promise, resolve } = Promise.withResolvers<void>()
+  const done = (): void => {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', done)
+    resolve()
+  }
+  const timer = setTimeout(done, ms)
+  timer.unref?.()
+  signal.addEventListener('abort', done, { once: true })
+  return promise
 }

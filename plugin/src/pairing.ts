@@ -76,6 +76,11 @@ export function pairingLink(pairing: Pairing, name = hostname()): string {
   return `dshduo://pair?${query}`
 }
 
+/** The pairing QR as a standalone SVG, for the in-app iPhone page. */
+export async function pairingSvg(link: string): Promise<string> {
+  return await QRCode.toString(link, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#000000', light: '#ffffff' } })
+}
+
 /** A QR code drawn with half-block characters, readable from a terminal or a monospace chat block. */
 export async function pairingQr(link: string): Promise<string> {
   return await QRCode.toString(link, { type: 'utf8', errorCorrectionLevel: 'M', margin: 2 })

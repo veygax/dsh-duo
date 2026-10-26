@@ -89,4 +89,6 @@ export interface HostContext {
   get(name: string): unknown
   on(event: string, listener: (...args: never[]) => unknown, options?: { prepend?: boolean }): () => void
   effect?(execute: () => () => unknown): unknown
+  /** Register a service owned by this plugin's fiber; returns its disposer. */
+  provide?(name: string, value: object): () => void
 }

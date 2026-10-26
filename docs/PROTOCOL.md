@@ -19,7 +19,7 @@ The Host keeps one pairing record in `$DSH_HOME/duo-remote/pairing.json`:
 { "roomId": "<22-char base64url>", "secret": "<43-char base64url of 32 bytes>", "relay": "https://relay.example" }
 ```
 
-It is shown as a QR code (terminal, `/duo-pair` command, and `dsh-duo pair`)
+It is shown as a QR code on the **iPhone** page in the dsh Web and Desktop apps (and by `dsh-duo pair` in a terminal)
 encoding:
 
 ```

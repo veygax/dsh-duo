@@ -23,23 +23,44 @@ struct RootView: View {
 /// across the inner display and collapses to one column on the outer display.
 struct MainSplitView: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var columns = NavigationSplitViewVisibility.automatic
+    @State private var windowSize = CGSize.zero
+    @State private var layoutEpoch = 0
 
     var body: some View {
-        @Bindable var store = store
-        NavigationSplitView(columnVisibility: $store.columnVisibility) {
+        NavigationSplitView(columnVisibility: $columns) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
         } detail: {
             if let sessionId = store.selectedSessionId {
                 SessionView(sessionId: sessionId)
                     .id(sessionId)
+                    // Only the open inner display has room beside the chat once the sidebar is hidden.
+                    .environment(\.sidebarHidden, sizeClass == .regular && columns == .detailOnly)
             } else {
                 NoSessionView()
             }
         }
         .navigationSplitViewStyle(.balanced)
         .onChange(of: store.selectedSessionId) { _, _ in Haptics.selection() }
+        .environment(\.layoutEpoch, layoutEpoch)
+        .onGeometryChange(for: CGSize.self, of: \.size) { windowSize = $0 }
+        .task(id: windowSize) {
+            // Folding or unfolding moves the app to another display. Once the new size has settled,
+            // transcripts lay themselves out again (see TranscriptView).
+            guard windowSize != .zero else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            layoutEpoch += 1
+        }
     }
+}
+
+extension EnvironmentValues {
+    /// The sidebar is collapsed on the open inner display, leaving the session the whole width.
+    @Entry var sidebarHidden = false
+    /// Bumped after the window changes size (fold, unfold, rotation).
+    @Entry var layoutEpoch = 0
 }
 
 struct NoSessionView: View {

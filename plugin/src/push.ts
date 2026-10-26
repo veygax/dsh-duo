@@ -196,6 +196,11 @@ export class DeviceTokens {
     await this.save()
   }
 
+  async clear(): Promise<void> {
+    this.tokens = {}
+    await this.save()
+  }
+
   async remove(deviceId: string): Promise<void> {
     if (this.tokens[deviceId] === undefined) return
     delete this.tokens[deviceId]

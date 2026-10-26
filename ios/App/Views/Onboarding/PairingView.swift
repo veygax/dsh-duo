@@ -33,12 +33,12 @@ struct PairingView: View {
             Button("Pair") { pair(typedLink) }
             Button("Cancel", role: .cancel) { Haptics.tap() }
         } message: {
-            Text("Run `dsh-duo pair` on your Mac to show the link.")
+            Text("In DeepSeek Harness on your Mac, open iPhone in the sidebar and click Copy Link.")
         }
         .alert("That isn't a pairing code", isPresented: $invalid) {
             Button("OK", role: .cancel) { Haptics.tap() }
         } message: {
-            Text("Scan the QR code that dsh prints after the duo-remote plugin starts, or run `dsh-duo pair`.")
+            Text("Use the code on the iPhone page in DeepSeek Harness on your Mac.")
         }
     }
 
@@ -68,16 +68,17 @@ struct PairingView: View {
     private var steps: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                StepRow(number: 1, title: "Install the companion plugin",
-                        detail: "On your Mac:", code: "dsh plugin add dsh-plugin-duo-remote")
-                StepRow(number: 2, title: "Start dsh",
-                        detail: "A pairing QR code appears in the terminal. Lost it? Run:", code: "dsh-duo pair")
-                StepRow(number: 3, title: "Scan it with this iPhone",
-                        detail: "No VPN or port forwarding. Everything is end-to-end encrypted.", code: nil)
+                StepRow(number: 1, title: "Add DSH Duo to DeepSeek Harness",
+                        detail: "Install the DSH Duo plugin in DeepSeek Harness on your Mac.", code: nil)
+                StepRow(number: 2, title: "Open iPhone in its sidebar",
+                        detail: "A pairing code appears there.", code: nil)
+                StepRow(number: 3, title: "Scan the code",
+                        detail: "Or click Copy Link on your Mac and tap Paste here. No VPN or port forwarding, and everything is end-to-end encrypted.",
+                        code: nil)
 
                 VStack(spacing: 12) {
                     Button(action: tap { startScan() }) {
-                        Label("Scan Pairing QR Code", systemImage: "qrcode.viewfinder")
+                        Label("Scan Pairing Code", systemImage: "qrcode.viewfinder")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)

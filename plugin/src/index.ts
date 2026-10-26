@@ -4,11 +4,13 @@
  * port, VPN, or public address; every message is end-to-end encrypted.
  */
 
+import { execFileSync } from 'node:child_process'
 import { hostname } from 'node:os'
 import { Bridge, VERSION } from './bridge.ts'
 import type { HostContext, Logger } from './host.ts'
 import type { ApnsTransport } from './push.ts'
-import { dshHome, pairingLink, pairingPath, pairingQr, rotatePairing } from './pairing.ts'
+import { dshHome } from './pairing.ts'
+import { providePanel } from './panel.ts'
 
 /** Public relay used when neither the plugin row nor `$DSH_DUO_RELAY` names one. It only ever sees ciphertext. */
 export const DEFAULT_RELAY = 'https://dsh-duo-relay.cloudflare-hybrid809.workers.dev'
@@ -38,6 +40,17 @@ function loggerOf(ctx: HostContext): { info(message: string): void; warn(message
   }
 }
 
+/** The Mac's user-facing name ("Evan's MacBook Pro"), falling back to the network host name. */
+function computerName(): string {
+  if (process.platform === 'darwin') {
+    try {
+      const name = execFileSync('scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim()
+      if (name !== '') return name
+    } catch { /* fall back */ }
+  }
+  return hostname().replace(/\.local$/, '')
+}
+
 export function apply(ctx: HostContext, config: Config = {}): void {
   const log = loggerOf(ctx)
   const relay = config.relay || process.env.DSH_DUO_RELAY || DEFAULT_RELAY
@@ -45,39 +58,34 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const bridge = new Bridge(ctx, {
     relay,
     home,
-    hostName: config.hostName ?? hostname(),
+    hostName: config.hostName ?? computerName(),
     holdQuestions: config.holdQuestions ?? true,
     historyMessages: config.historyMessages ?? 200,
     ...config.apnsTransport === undefined ? {} : { apnsTransport: config.apnsTransport },
   }, log)
 
-  const started = bridge.start().catch((error: unknown) => {
+  const started = bridge.start().then(() => bridge, (error: unknown) => {
     log.warn(`duo-remote failed to start: ${String(error)}`)
+    throw error
   })
+  started.catch(() => undefined)
+
+  // The "iPhone" page in the dsh Web and Desktop apps; absent on headless profiles.
+  const unprovide = providePanel(ctx, started)
 
   const unregister = ctx.get('commands')?.register({
     name: 'duo-pair',
-    description: 'Show DSH Duo (iPhone) pairing status; `/duo-pair qr` prints the pairing QR in the dsh terminal',
-    input: { hint: 'qr | rotate' },
-    handler: async ({ rawInput }) => {
+    description: 'DSH Duo (iPhone) connection status',
+    handler: async () => {
       await started
-      const arg = rawInput.trim()
-      if (arg === 'rotate') {
-        const pairing = await rotatePairing(pairingPath(home), relay)
-        process.stdout.write(`\n${await pairingQr(pairingLink(pairing, config.hostName ?? hostname()))}\n`)
-        return { kind: 'success', text: 'Pairing rotated: every phone is unpaired. Restart dsh, then scan the new QR printed in its terminal (or run `dsh-duo pair`).' }
-      }
-      if (arg === 'qr') {
-        await bridge.printPairing()
-        return { kind: 'success', text: 'The pairing QR was printed in the terminal running dsh. You can also run `dsh-duo pair` in any terminal on this machine.' }
-      }
-      // The QR carries the room secret, so it is never written into the Session log.
-      return { kind: 'success', text: `DSH Duo ${VERSION}\n${bridge.status()}\n\nRun \`/duo-pair qr\` or \`dsh-duo pair\` to show the pairing QR.` }
+      // The pairing code carries the room secret, so it is shown only on the iPhone page, never in a Session log.
+      return { kind: 'success', text: `DSH Duo ${VERSION}\n${bridge.status()}\n\nTo pair an iPhone, open **iPhone** in the sidebar.` }
     },
   })
 
   const dispose = (): void => {
     unregister?.()
+    unprovide?.()
     void bridge.stop()
   }
   if (typeof ctx.effect === 'function') ctx.effect(() => dispose)

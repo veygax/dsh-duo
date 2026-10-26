@@ -32,16 +32,17 @@ or configure the row in your profile's `cordis.patch.yml`:
     historyMessages: 200         # messages loaded when a session opens
 ```
 
-Start dsh (`dsh web`, or the desktop app). The first time, a pairing QR code prints in the terminal.
+Start dsh (the desktop app or `dsh web`) and open **iPhone** in the sidebar.
 
 ## Pairing
 
 | | |
 |---|---|
-| `dsh-duo pair` | Print the pairing QR code and link |
+| **iPhone** page (sidebar) | Pairing code, Copy Link, paired phones, notification status, Unpair All Phones |
+| `dsh-duo pair` | Print the pairing QR code and link in a terminal |
 | `dsh-duo rotate` | New secret: unpairs every phone |
 | `dsh-duo status` | Relay, room and pairing file |
-| `/duo-pair` | In any dsh session: connection status (`/duo-pair qr` prints the QR in the dsh terminal) |
+| `/duo-pair` | In any dsh session: connection status |
 
 The QR code carries the room secret, so the plugin never writes it into a session log. The pairing record lives in
 `$DSH_HOME/duo-remote/pairing.json` (mode 0600).

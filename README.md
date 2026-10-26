@@ -27,9 +27,8 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - **Sessions on the left.** A `NavigationSplitView` sidebar groups sessions by workspace with live running and
   waiting-for-you badges, search, swipe-to-rename and context menus. On the inner display it sits beside the open session;
   on the outer display it collapses to one column.
-- **Full screen.** Hides the sidebar, bars and status bar so the conversation spans the display. On the inner display
-  the session becomes an `ArrangementView` of the conversation and a live activity inspector, which keeps each pane on
-  its own side of the fold.
+- **Detail pane.** On the open inner display with the sidebar hidden, tapping a thought or tool call opens it in full
+  in a pane on the right; swipe it away or tap ✕ to close it. Elsewhere they expand inline.
 - **Models and thinking levels.** A composer chip lists every provider's models from the Host's catalog, with the
   model's reasoning efforts (for example Low / Medium / High / Max).
 - **Thinking, tool calls and messages.** Streaming thinking (collapsible), tool calls with arguments, results and status,
@@ -76,7 +75,7 @@ Follows Apple's [Liquid Glass](https://developer.apple.com/documentation/technol
   scroll edge effect.
 - **Concentric shapes.** Custom glass uses `.rect(corners: .concentric(minimum:), isUniform: true)` to stay concentric
   with the display and its containers.
-- **Toolbars:** icon items with accessibility labels, Stop and Full Screen as separate items with a
+- **Toolbars:** icon items with accessibility labels, Stop and the overflow menu as separate items with a
   `ToolbarSpacer(.fixed)`, conditional items rather than hidden views, and the system overflow menu.
 - **Restrained color.** The accent color has light, dark and increased-contrast variants. Action sheets are anchored
   to the control that opens them, and section headers use title-style capitalization.
@@ -91,7 +90,8 @@ Follows Apple's [Liquid Glass](https://developer.apple.com/documentation/technol
    dsh plugin add dsh-plugin-duo-remote
    ```
 
-   Start dsh (`dsh web` or the desktop app). A pairing QR code prints in the terminal; `dsh-duo pair` shows it again.
+   Start dsh (the desktop app or `dsh web`) and open **iPhone** in the sidebar. The pairing code is there, and the page
+   shows each paired phone, whether notifications are on, and an **Unpair All Phones** button.
    The plugin uses the public relay at `https://dsh-duo-relay.cloudflare-hybrid809.workers.dev` by default, so there is
    nothing else to set up. It only ever carries ciphertext. To run your own relay instead, see
    [relay/README.md](relay/README.md) and set `DSH_DUO_RELAY` or the plugin's `relay` option.

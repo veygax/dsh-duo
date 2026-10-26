@@ -87,6 +87,50 @@ struct MarkdownTests {
 }
 
 @MainActor
+struct MarkdownTableTests {
+    @Test func parsesTablesWithAlignmentAndEscapedPipes() throws {
+        let blocks = MarkdownText.parse("""
+        Results:
+
+        | Test | Runs | Status |
+        |:-----|-----:|:------:|
+        | login | 50 | ✅ |
+        | a \\| b | 3 |
+        After the table.
+        """)
+        #expect(blocks.count == 3)
+        guard case .table(let table) = blocks[1] else {
+            Issue.record("expected a table")
+            return
+        }
+        #expect(table.header == ["Test", "Runs", "Status"])
+        #expect(table.rows == [["login", "50", "✅"], ["a | b", "3", ""]])
+        #expect(table.alignments == [.leading, .trailing, .center])
+    }
+
+    @Test func acceptsShortDelimiterCells() throws {
+        let blocks = MarkdownText.parse("| Endpoint | Before | After |\n|:--|--:|:-:|\n| `GET /orders` | 1.8 s | 120 ms |")
+        guard case .table(let table) = try #require(blocks.first) else {
+            Issue.record("expected a table")
+            return
+        }
+        #expect(table.alignments == [.leading, .trailing, .center])
+        #expect(table.rows == [["`GET /orders`", "1.8 s", "120 ms"]])
+    }
+
+    @Test func keepsARuleUnderAPipeLineAsARule() {
+        let blocks = MarkdownText.parse("a | b\n---")
+        if case .table = blocks.first { Issue.record("a horizontal rule became a table") }
+    }
+
+    @Test func leavesPipesInProseAlone() {
+        let blocks = MarkdownText.parse("Use a | b to pipe.\nNo table here.")
+        #expect(blocks.count == 1)
+        if case .table = blocks[0] { Issue.record("prose became a table") }
+    }
+}
+
+@MainActor
 struct NotificationPayloadTests {
     /// The Notification Service Extension path: open the sealed `e` field and rewrite the alert.
     @Test func decryptsAndRewritesAQuestionPush() throws {
