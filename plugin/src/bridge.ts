@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { open as openFile } from 'node:fs/promises'
+import { open as openFile, readdir } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
@@ -22,6 +22,8 @@ export const VERSION = '0.1.0'
 
 /** Largest file `fs.read` hands over: sealed and encoded twice, it must still fit one 4 MB relay frame. */
 const MAX_READ_BYTES = 2 * 1024 * 1024
+/** Most entries `fs.read` lists for a folder. */
+const MAX_FOLDER_ENTRIES = 1000
 
 export interface BridgeConfig {
   readonly relay: string
@@ -582,7 +584,7 @@ export class Bridge {
     })
     try {
       const stat = await handle.stat()
-      if (stat.isDirectory()) throw new RemoteFailure('duo/is-directory', `${full} is a folder`)
+      if (stat.isDirectory()) return await this.listFolder(full)
       if (stat.size > MAX_READ_BYTES) {
         throw new RemoteFailure('duo/too-large', `${basename(full)} is ${(stat.size / 1048576).toFixed(1)} MB, over the 2 MB preview limit`)
       }
@@ -590,6 +592,27 @@ export class Bridge {
       return { path: full, name: basename(full), size: data.length, data: data.toString('base64') }
     } finally {
       await handle.close()
+    }
+  }
+
+  /** A linked folder's files and subfolders, folders first, for the phone to pick one to preview. */
+  private async listFolder(path: string) {
+    const entries = await readdir(path, { withFileTypes: true })
+    const shown = entries
+      .filter(entry => entry.isFile() || entry.isDirectory())
+      .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name, undefined, { numeric: true }))
+      .slice(0, MAX_FOLDER_ENTRIES)
+    return {
+      path,
+      name: basename(path),
+      folder: true,
+      entries: shown.map(entry => ({
+        name: entry.name,
+        path: join(path, entry.name),
+        folder: entry.isDirectory(),
+        hidden: entry.name.startsWith('.'),
+      })),
+      truncated: entries.length > shown.length,
     }
   }
 

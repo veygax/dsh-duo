@@ -14,9 +14,12 @@ struct SessionView: View {
     @State private var inspectorShown = false
     @State private var query = ""
     @State private var searching = false
+    @FocusState private var searchFocused: Bool
     /// A linked file on the Mac, once fetched, and the name of one still on its way.
     @State private var previewed: URL?
     @State private var fetching: String?
+    /// A linked folder, to pick a file from.
+    @State private var picking: HostFolder?
 
     var body: some View {
         let session = store.sessions[sessionId]
@@ -25,13 +28,24 @@ struct SessionView: View {
                 ConversationView(model: model, sessionId: sessionId)
                     // Over the composer too: while results are up there is nothing to send.
                     .overlay {
-                        if searching && !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        if typing {
                             SearchResultsView(model: model, query: query) { hit in
                                 Haptics.selection()
-                                searching = false
+                                closeSearch()
                                 model.reveal = Reveal(itemId: hit.itemId)
                             }
                             .background(.background)
+                        }
+                    }
+                    // Centred at the top while empty, clear of the composer; once there is a query the
+                    // results cover the composer, and the field slides straight down over the keyboard.
+                    .overlay {
+                        if searching {
+                            SearchBar(query: $query, focused: $searchFocused, close: closeSearch)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .frame(maxHeight: .infinity, alignment: typing ? .bottom : .top)
+                                .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
                     .environment(\.paneOpen, inspecting && inspectorShown)
@@ -60,6 +74,12 @@ struct SessionView: View {
             return .handled
         })
         .quickLookPreview($previewed)
+        .sheet(item: $picking) { folder in
+            FolderPicker(folder: folder, sessionId: sessionId) { path in
+                picking = nil
+                preview(path)
+            }
+        }
         .overlay(alignment: .top) {
             if let fetching {
                 Label {
@@ -76,12 +96,11 @@ struct SessionView: View {
             }
         }
         .animation(.snappy, value: fetching)
+        .animation(.smooth, value: typing)
+        .animation(.smooth, value: searching)
         .navigationTitle(session?.title ?? "Session")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar(session) }
-        // A search button in the toolbar that expands into the field, as the system's own apps do.
-        .searchable(text: $query, isPresented: $searching, placement: .toolbar, prompt: "Search Messages")
-        .searchToolbarBehavior(.minimize)
         // Task-oriented screen: keep its actions over the tab bar when space is tight.
         .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
         .onChange(of: inspecting) { _, inspecting in if !inspecting { inspectorShown = false } }
@@ -98,14 +117,28 @@ struct SessionView: View {
         .onDisappear { if let model { store.detach(model) } }
     }
 
+    private func openSearch() {
+        searching = true
+    }
+
+    private func closeSearch() {
+        searchFocused = false
+        searching = false
+        query = ""
+    }
+
     private func preview(_ path: String) {
         guard fetching == nil else { return }
         Haptics.tap()
         fetching = (path as NSString).lastPathComponent
         Task {
-            let url = await store.download(path, in: sessionId)
+            let download = await store.download(path, in: sessionId)
             fetching = nil
-            previewed = url
+            switch download {
+            case .file(let url): previewed = url
+            case .folder(let folder): picking = folder
+            case nil: break
+            }
         }
     }
 
@@ -138,18 +171,34 @@ struct SessionView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
 
-        ToolbarOverflowMenu {
-            if let session {
-                Button("Rename", systemImage: "pencil", action: tap { renaming = session })
-                if let cwd = session.cwd {
-                    Button("Copy Folder Path", systemImage: "doc.on.doc", action: tap { UIPasteboard.general.string = cwd })
+        // A trailing menu rather than the system overflow menu, which the toolbar always puts last:
+        // this way search sits under it.
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu("More", systemImage: "ellipsis") {
+                if let session {
+                    Button("Rename", systemImage: "pencil", action: tap { renaming = session })
+                    if let cwd = session.cwd {
+                        Button("Copy Folder Path", systemImage: "doc.on.doc", action: tap { UIPasteboard.general.string = cwd })
+                    }
                 }
+                Button("Reload", systemImage: "arrow.clockwise", action: tap {
+                    if let model { Task { await store.open(model) } }
+                })
             }
-            Button("Reload", systemImage: "arrow.clockwise", action: tap {
-                if let model { Task { await store.open(model) } }
+            // Plain like the system overflow menu, not tinted like an action.
+            .tint(.primary)
+        }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Search", systemImage: "magnifyingglass", action: tap {
+                searching ? closeSearch() : openSearch()
             })
+            .keyboardShortcut("f", modifiers: .command)
+            .tint(.primary)
         }
     }
+
+    private var typing: Bool { searching && !query.trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
 /// Markdown links DeepSeek writes to files on the Mac: `[a.swift](src/a.swift)`, `[x](/Users/me/x.md:42)`,

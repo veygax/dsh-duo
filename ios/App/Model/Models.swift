@@ -187,6 +187,22 @@ nonisolated struct DirectoryListing: Codable, Hashable, Sendable {
     var entries: [Entry]
 }
 
+/// A folder on the Mac that DeepSeek linked to (docs/PROTOCOL.md `fs.read`).
+nonisolated struct HostFolder: Codable, Hashable, Identifiable, Sendable {
+    struct Entry: Codable, Hashable, Identifiable, Sendable {
+        var name: String
+        var path: String
+        var folder: Bool
+        var hidden: Bool
+        var id: String { path }
+    }
+    var path: String
+    var name: String
+    var entries: [Entry]
+    var truncated: Bool?
+    var id: String { path }
+}
+
 nonisolated struct RemoteError: LocalizedError, Sendable {
     var code: String
     var message: String

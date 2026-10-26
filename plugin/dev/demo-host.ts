@@ -136,7 +136,7 @@ session('s-notes', 'Summarize the RFC', '/Users/dev/Documents', 1440, 'minimal',
 session('s-files', 'Review the protocol docs', new URL('../..', import.meta.url).pathname.replace(/\/$/, ''), 2, 'standard', [
   ev('turn/start', { turn: 1 }),
   user('Where is the phone protocol documented?'),
-  assistant(1, [{ type: 'text', text: 'It lives in [PROTOCOL.md](docs/PROTOCOL.md:88), next to the [README](README.md). The bridge that answers it is [bridge.ts](plugin/src/bridge.ts), and the app icon is [icon.json](ios/App/AppIcon.icon/icon.json).' }]),
+  assistant(1, [{ type: 'text', text: 'It lives in [PROTOCOL.md](docs/PROTOCOL.md:88), next to the [README](README.md). The bridge that answers it is [bridge.ts](plugin/src/bridge.ts), with the rest of the plugin in [plugin/src](plugin/src), and the app icon is [icon.json](ios/App/AppIcon.icon/icon.json).' }]),
   ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
 ])
 

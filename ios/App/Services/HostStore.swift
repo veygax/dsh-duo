@@ -460,12 +460,19 @@ final class HostStore {
 
     // MARK: Files
 
-    /// Fetch a file DeepSeek linked to into a private temporary folder for QuickLook. A relative
-    /// path is the Host's to resolve, against the Session's folder.
-    func download(_ path: String, in sessionId: String) async -> URL? {
+    enum Download {
+        case file(URL)
+        case folder(HostFolder)
+    }
+
+    /// Fetch what DeepSeek linked to: a file into a private temporary folder for QuickLook, or a
+    /// folder's listing to pick a file from. A relative path is the Host's to resolve, against the
+    /// Session's folder.
+    func download(_ path: String, in sessionId: String) async -> Download? {
         guard let client else { return nil }
         do {
             let value = try await client.request("fs.read", ["path": path, "sessionId": sessionId], timeout: .seconds(60))
+            if value["folder"]?.bool == true { return .folder(try value.decode(HostFolder.self)) }
             guard let name = value["name"]?.string, let encoded = value["data"]?.string,
                   let data = Data(base64Encoded: encoded) else {
                 throw RemoteError(code: "duo/bad-response", message: "The Mac sent an unreadable file")
@@ -480,7 +487,7 @@ final class HostStore {
                 try FileManager.default.moveItem(at: url, to: text)
                 url = text
             }
-            return url
+            return .file(url)
         } catch {
             show(error)
             return nil

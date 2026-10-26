@@ -17,6 +17,8 @@ struct SearchResultsView: View {
                 .buttonStyle(.plain)
         }
         .listStyle(.plain)
+        // The search field floats over the last rows.
+        .contentMargins(.bottom, 72, for: .scrollContent)
         .overlay {
             if hits.isEmpty && found == query {
                 ContentUnavailableView.search(text: query)
@@ -83,5 +85,56 @@ private struct SearchHitRow: View {
         case .notice: "info.circle"
         default: "sparkle"
         }
+    }
+}
+
+/// The search field for the open Session: a glass capsule with a close button beside it. It is one
+/// field throughout, so where it sits can change without the keyboard going away.
+struct SearchBar: View {
+    @Binding var query: String
+    var focused: FocusState<Bool>.Binding
+    let close: () -> Void
+
+    var body: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search Messages", text: $query)
+                        .focused(focused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onKeyPress(.escape) {
+                            close()
+                            return .handled
+                        }
+                    if !query.isEmpty {
+                        Button("Clear", systemImage: "xmark.circle.fill", action: tap { query = "" })
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .scale))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(.capsule)
+                .onTapGesture { focused.wrappedValue = true }
+                .glassEffect(.regular.interactive(), in: .capsule)
+
+                Button("Close Search", systemImage: "xmark", action: tap { close() })
+                    .labelStyle(.iconOnly)
+                    .font(.body.weight(.medium))
+                    .frame(width: 48, height: 48)
+                    .contentShape(.circle)
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+        }
+        .frame(maxWidth: 560)
+        .animation(.snappy, value: query.isEmpty)
+        .onAppear { focused.wrappedValue = true }
     }
 }
