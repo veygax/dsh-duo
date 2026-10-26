@@ -39,6 +39,7 @@ targets:
       path: App/DSHDuo.entitlements
       properties:
         aps-environment: development
+        com.apple.developer.usernotifications.communication: true
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(DSH_BUNDLE_ID).shared
     info:
@@ -56,6 +57,9 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIBackgroundModes:
           - remote-notification
+        # Notifications show as messages from DeepSeek (communication notifications).
+        NSUserActivityTypes:
+          - INSendMessageIntent
         NSCameraUsageDescription: DSH Duo uses the camera to scan the pairing QR code shown by dsh on your Mac.
         ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:

@@ -40,17 +40,26 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Notify about a Session the user is not looking at while the app is open.
     func local(title: String, body: String, sessionId: String, kind: String, callId: String? = nil, questionId: String? = nil) {
         let content = UNMutableNotificationContent()
-        PushPayload(kind: kind, sessionId: sessionId, title: title, body: body, callId: callId, questionId: questionId)
-            .apply(to: content)
+        let payload = PushPayload(kind: kind, sessionId: sessionId, title: title, body: body, callId: callId, questionId: questionId)
+        payload.apply(to: content)
         content.sound = .default
-        let request = UNNotificationRequest(identifier: "\(kind)-\(callId ?? sessionId)", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        let identifier = "\(kind)-\(callId ?? sessionId)"
+        Task {
+            content.badge = await Badge.adding(identifier)
+            let message = await MessageNotification.present(payload, in: content)
+            try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: identifier, content: message, trigger: nil))
+        }
+    }
+
+    /// The Session is on screen: its notifications are read.
+    func read(_ sessionId: String?) {
+        Task { await Badge.read(sessionId) }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let sessionId = notification.request.content.userInfo[NotificationIDs.sessionKey] as? String
         let visible = await MainActor.run { store?.isActive == true && store?.selectedSessionId == sessionId }
-        return visible ? [] : [.banner, .list, .sound]
+        return visible ? [] : [.banner, .list, .sound, .badge]
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
@@ -71,6 +80,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                     "sessionId": sessionId, "text": text, "mode": "queue", "timeZone": TimeZone.current.identifier,
                 ])
             }
+            // Replying answers the conversation, as in Messages.
+            await Badge.read(sessionId)
             return
         }
         await MainActor.run {

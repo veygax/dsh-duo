@@ -16,6 +16,7 @@
 		1758C2E2151C3E29154F238B /* TranscriptSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4445BBE0B734063F985A78BC /* TranscriptSearch.swift */; };
 		1EE7CE58C9F24C6E4C6EED13 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCEA930A7B1ED75196A172AD /* ConversationView.swift */; };
 		254C09D10AFC9EC601CBB810 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = F6ACA182D9C68A5317907153 /* AppIcon.icon */; };
+		2845B42CD1C0D35511C4D40D /* MessageNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B79F5CD7CE78A02BDADACA6 /* MessageNotification.swift */; };
 		3228B3853B228943B75D3F80 /* DuoCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED92AE61B24458488741F75D /* DuoCrypto.swift */; };
 		3914D7496D121C18D6027BC2 /* DSHDuoNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D6CC76C18373C0747D4EFE25 /* DSHDuoNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		39351F61912BC2FFBA76C814 /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398F723FF55C9BCFBBE97519 /* PairingStore.swift */; };
@@ -33,6 +34,7 @@
 		9437A6FED8D486FDB5E1AE88 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8EEE2F95E3A6637EF8E757A /* PairingView.swift */; };
 		988704D34B3195596F14E2AE /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D594302B722D7E193A46A3 /* PushPayload.swift */; };
 		A159F20D5ACA90F41D1BB364 /* FolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE8729C9020E5E0C01FC837C /* FolderPicker.swift */; };
+		A2186B8C1AC54F072052FDE5 /* MessageNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B79F5CD7CE78A02BDADACA6 /* MessageNotification.swift */; };
 		B5A4DA16A844661EBAFDD3BD /* NewSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114705792DD8A39638541EBB /* NewSessionSheet.swift */; };
 		BEAA77104C8E78D01D8569BF /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3DACBF40F694448B714D2D5 /* RootView.swift */; };
 		C03CDE8D56FCF0DCCFC67FD2 /* DuoCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED92AE61B24458488741F75D /* DuoCrypto.swift */; };
@@ -82,6 +84,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0B79F5CD7CE78A02BDADACA6 /* MessageNotification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotification.swift; sourceTree = "<group>"; };
 		114705792DD8A39638541EBB /* NewSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionSheet.swift; sourceTree = "<group>"; };
 		1776AEA301FA6D6F36488120 /* RelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayClient.swift; sourceTree = "<group>"; };
 		20F7305D85FBE6CB3C25B208 /* DSHDuoNotifications.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DSHDuoNotifications.entitlements; sourceTree = "<group>"; };
@@ -153,6 +156,7 @@
 			isa = PBXGroup;
 			children = (
 				ED92AE61B24458488741F75D /* DuoCrypto.swift */,
+				0B79F5CD7CE78A02BDADACA6 /* MessageNotification.swift */,
 				398F723FF55C9BCFBBE97519 /* PairingStore.swift */,
 				F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */,
 				94D594302B722D7E193A46A3 /* PushPayload.swift */,
@@ -415,6 +419,7 @@
 				91B7B7384A2ED12407DF97ED /* JSONValue.swift in Sources */,
 				FAE819E8E132A488BA1F1C1D /* MarkdownText.swift in Sources */,
 				D7060494C2F49894DE027C05 /* Menus.swift in Sources */,
+				2845B42CD1C0D35511C4D40D /* MessageNotification.swift in Sources */,
 				D7E89D346E2DC2A6EC946269 /* Models.swift in Sources */,
 				C2F332D691F6FDF6222313FF /* Modes.swift in Sources */,
 				B5A4DA16A844661EBAFDD3BD /* NewSessionSheet.swift in Sources */,
@@ -441,6 +446,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C03CDE8D56FCF0DCCFC67FD2 /* DuoCrypto.swift in Sources */,
+				A2186B8C1AC54F072052FDE5 /* MessageNotification.swift in Sources */,
 				683D2B68220F31F50CA5C423 /* NotificationService.swift in Sources */,
 				39351F61912BC2FFBA76C814 /* PairingStore.swift in Sources */,
 				C2D7D17735DC1AB7A0E455E5 /* PushEnvironment.swift in Sources */,

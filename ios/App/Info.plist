@@ -44,6 +44,10 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>DSH Duo uses the camera to scan the pairing QR code shown by dsh on your Mac.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

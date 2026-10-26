@@ -31,7 +31,9 @@ final class HostStore {
     private var models: [String: SessionModel] = [:]
 
     /// Split view selection; also drives which Session counts as "visible" for notifications.
-    var selectedSessionId: String?
+    var selectedSessionId: String? {
+        didSet { if isActive { Notifier.shared.read(selectedSessionId) } }
+    }
     /// Transient message shown at the top of the window.
     var banner: Banner?
     var isActive = true
@@ -95,6 +97,7 @@ final class HostStore {
     /// Called from scene phase changes. Backgrounded apps hang up so the relay sends pushes instead.
     func setActive(_ active: Bool) {
         isActive = active
+        if active { Notifier.shared.read(selectedSessionId) }
         if active { client?.connect() } else { client?.disconnect() }
     }
 
