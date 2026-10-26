@@ -33,9 +33,11 @@ nonisolated struct Pairing: Codable, Equatable, Sendable {
     }
 }
 
-/// Keychain storage shared with the Notification Service Extension through the App Group.
+/// Keychain storage shared with the Notification Service Extension through a keychain access group.
 nonisolated enum PairingStore {
-    static let appGroup = "group.ai.deepseek.harness.duo"
+    /// `<team>.<bundle id>.shared`, set per signed build through the `DSHKeychainGroup` Info.plist key.
+    /// A team's profiles allow any `<team>.*` group, so signing needs nothing registered on the developer site.
+    static let accessGroup = Bundle.main.object(forInfoDictionaryKey: "DSHKeychainGroup") as? String
     private static let service = "ai.deepseek.harness.duo.pairing"
     private static let account = "host"
 
@@ -45,7 +47,7 @@ nonisolated enum PairingStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        if shared { query[kSecAttrAccessGroup as String] = appGroup }
+        if shared, let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
         return query
     }
 
@@ -85,7 +87,7 @@ nonisolated enum PairingStore {
 
     /// Stable per-install device identity used for relay routing.
     static var deviceId: String {
-        let defaults = UserDefaults(suiteName: appGroup) ?? .standard
+        let defaults = UserDefaults.standard
         if let id = defaults.string(forKey: "deviceId") { return id }
         let id = "ios-" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(20).lowercased()
         defaults.set(id, forKey: "deviceId")

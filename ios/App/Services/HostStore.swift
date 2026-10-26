@@ -19,6 +19,8 @@ final class HostStore {
     private(set) var pairing: Pairing?
     private(set) var connection: Connection = .unpaired
     private(set) var hostVersion: String?
+    /// Whether the paired Mac has an Apple push key for this app (set up by `ios/scripts/install.sh`).
+    private(set) var pushEnabledOnHost: Bool?
     private(set) var sessions: [String: SessionInfo] = [:]
     private(set) var workspaces: [Workspace] = []
     private(set) var presets: [Preset] = []
@@ -109,23 +111,29 @@ final class HostStore {
         case .online(host: false): connection = .hostOffline
         case .online(host: true):
             connection = .online
-            if let pushToken { client?.registerPush(token: pushToken, production: Self.productionPush) }
-            Task { await hello() }
+            Task {
+                await hello()
+                await registerPush()
+            }
         case .failed(let message): connection = .failed(message)
         }
     }
 
     func setPushToken(_ token: String) {
         pushToken = token
-        client?.registerPush(token: token, production: Self.productionPush)
+        Task { await registerPush() }
     }
 
-    private static var productionPush: Bool {
-        #if DEBUG
-        false
-        #else
-        true
-        #endif
+    /// Hand the APNs token to the paired Mac (sealed, through the relay). The Mac sends pushes
+    /// itself with the key of the team that signed this build; the relay never holds Apple keys.
+    private func registerPush() async {
+        guard let client, client.hostOnline, let pushToken else { return }
+        let value = try? await client.request("push.register", [
+            "token": pushToken,
+            "env": PushEnvironment.current,
+            "topic": Bundle.main.bundleIdentifier ?? "",
+        ])
+        if let enabled = value?["enabled"]?.bool { pushEnabledOnHost = enabled }
     }
 
     private func hello() async {
@@ -135,6 +143,7 @@ final class HostStore {
                 "device": ["name": UIDevice.current.name, "model": UIDevice.current.model],
             ])
             hostVersion = value["version"]?.string
+            pushEnabledOnHost = value["push"]?["enabled"]?.bool
             presets = (try? value["presets"]?.decode([Preset].self)) ?? []
             workspaces = (try? value["workspaces"]?.decode([Workspace].self)) ?? []
             let list = (try? value["sessions"]?.decode([SessionInfo].self)) ?? []

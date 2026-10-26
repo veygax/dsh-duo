@@ -7,3 +7,4 @@ relay/data/
 xcuserdata/
 DerivedData/
 *.xcuserstate
+build/

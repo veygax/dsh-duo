@@ -209,10 +209,6 @@ final class RelayClient {
         try await request(op, params).decode(T.self)
     }
 
-    func registerPush(token: String, production: Bool) {
-        sendRaw(["t": "push-register", "token": token, "env": production ? "production" : "sandbox"])
-    }
-
     /// Deliver one fire-and-forget request without a socket, e.g. from a notification reply.
     nonisolated static func post(_ pairing: Pairing, op: String, params: [String: Any]) async throws {
         guard let crypto = pairing.crypto else { throw RemoteError(code: "duo/pairing", message: "Not paired") }

@@ -13,13 +13,14 @@ end-to-end encrypted. See [`docs/PROTOCOL.md`](../docs/PROTOCOL.md).
 dsh plugin add dsh-plugin-duo-remote
 ```
 
-Point it at your relay (see [`relay/`](../relay)), either with an environment variable:
+It connects to the public relay `https://dsh-duo-relay.cloudflare-hybrid809.workers.dev` by default; that relay only
+forwards ciphertext. To use your own relay (see [`relay/`](../relay)), set an environment variable:
 
 ```bash
 export DSH_DUO_RELAY=https://dsh-duo-relay.example.workers.dev
 ```
 
-or in your profile's `cordis.patch.yml`:
+or configure the row in your profile's `cordis.patch.yml`:
 
 ```yaml
 - id: duo-remote
@@ -54,6 +55,9 @@ The QR code carries the room secret, so the plugin never writes it into a sessio
 - Holds `user-questions/request` for the phone (prepended, racing any Web client) once a phone has paired, and answers
   continued questions through `userQuestions/answer`.
 - On a running → idle transition, sends `turn.finished` to connected phones and an encrypted push to the others.
+- Sends push notifications itself, straight to Apple over HTTP/2, to phones that registered a token and aren't
+  connected. It uses the key of the team that signed that copy of the app, which `ios/scripts/install.sh --apns-key`
+  stores in `$DSH_HOME/duo-remote/apns.json`. The relay never holds Apple credentials.
 - `session.prompt` that starts with `/` goes through `commands/execute` first, the same way the Web composer does.
 
 ## Develop

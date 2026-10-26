@@ -4,7 +4,7 @@
     - id: duo-remote
       name: dsh-plugin-duo-remote
       config:
-        # Your relay (see relay/README.md). DSH_DUO_RELAY wins when this is unset.
+        # Relay URL. Unset uses DSH_DUO_RELAY, then the public relay (see relay/README.md).
         relay: !!js process.env.DSH_DUO_RELAY
         holdQuestions: true
         historyMessages: 200

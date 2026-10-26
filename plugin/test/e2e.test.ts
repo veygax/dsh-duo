@@ -4,7 +4,8 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { generateKeyPairSync } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -15,9 +16,11 @@ import { apply } from '../src/index.ts'
 import { socketUrl } from '../src/relay.ts'
 
 const port = 20_000 + Math.floor(Math.random() * 20_000)
-const relay = `http://127.0.0.1:${port}`
-let server: ChildProcess
+/** Set DUO_RELAY to run against a deployed relay instead of a local one. */
+const relay = process.env.DUO_RELAY ?? `http://127.0.0.1:${port}`
+let server: ChildProcess | undefined
 let home: string
+const pushes: Array<{ env: string; token: string; headers: Record<string, string>; body: string }> = []
 
 /** Async queue used to feed stream frames from the test. */
 class Feed<T> implements AsyncIterable<T> {
@@ -145,20 +148,38 @@ function emit(event: string, ...args: unknown[]): unknown {
 
 before(async () => {
   home = await mkdtemp(join(tmpdir(), 'dsh-duo-home-'))
-  const dataDir = await mkdtemp(join(tmpdir(), 'dsh-duo-relay-'))
-  server = spawn(process.execPath, [join(import.meta.dirname, '..', '..', 'relay', 'src', 'node.ts')], {
-    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir },
-    stdio: ['ignore', 'pipe', 'inherit'],
-  })
-  await new Promise<void>((resolve) => {
-    server.stdout!.on('data', (chunk: Buffer) => { if (chunk.toString().includes('listening')) resolve() })
-  })
+  if (process.env.DUO_RELAY === undefined) {
+    const dataDir = await mkdtemp(join(tmpdir(), 'dsh-duo-relay-'))
+    const child = spawn(process.execPath, [join(import.meta.dirname, '..', '..', 'relay', 'src', 'node.ts')], {
+      env: { ...process.env, PORT: String(port), DATA_DIR: dataDir },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+    server = child
+    await new Promise<void>((resolve) => {
+      child.stdout!.on('data', (chunk: Buffer) => { if (chunk.toString().includes('listening')) resolve() })
+    })
+  }
   const stdout = process.stdout.write.bind(process.stdout)
   process.stdout.write = ((chunk: string | Uint8Array) => typeof chunk === 'string' && chunk.includes('DSH Duo') ? true : stdout(chunk)) as typeof process.stdout.write
-  apply(ctx, { relay, hostName: 'test-mac' })
+  // This Mac's own APNs key, as ios/scripts/install.sh writes it.
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  await mkdir(join(home, 'duo-remote'), { recursive: true })
+  await writeFile(join(home, 'duo-remote', 'AuthKey_TESTKEY001.p8'), privateKey.export({ type: 'pkcs8', format: 'pem' }))
+  await writeFile(join(home, 'duo-remote', 'apns.json'), JSON.stringify({
+    keyId: 'TESTKEY001', teamId: 'TEAMID0001', keyFile: 'AuthKey_TESTKEY001.p8', topic: 'ai.example.duo',
+  }))
+  apply(ctx, { relay, hostName: 'test-mac', apnsTransport: async (env, token, headers, body) => {
+    pushes.push({ env, token, headers, body })
+    // The phone's token was minted for production; sandbox rejects it the way Apple does.
+    return env === 'sandbox' ? { status: 400, reason: 'BadDeviceToken' } : { status: 200 }
+  } })
 })
 
-after(() => { server.kill() })
+after(() => {
+  // Unload the plugin so its relay link closes; a deployed relay would otherwise keep the process alive.
+  emit('dispose')
+  server?.kill()
+})
 
 class Phone {
   private nextId = 1
@@ -297,4 +318,35 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.equal(still.ok, true)
 
   phone.ws.close()
+})
+
+test('a disconnected phone gets an encrypted push from this Mac, not the relay', async () => {
+  const phone = await connectPhone()
+  const hello = await phone.call('hello', { device: { name: 'Test', model: 'iPhone Duo' } })
+  assert.deepEqual((hello.value as { push: unknown }).push, { enabled: true, topic: 'ai.example.duo' })
+  const token = 'ab'.repeat(32)
+  const registered = await phone.call('push.register', { token, env: 'sandbox', topic: 'ai.example.duo' })
+  assert.deepEqual(registered.value, { enabled: true })
+  phone.ws.close()
+
+  // Once the relay reports the phone gone, a finished turn becomes a push.
+  for (let attempt = 0; attempt < 40 && pushes.length < 2; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 150))
+    emit('api-session/status', 'sess-1', true)
+    emit('api-session/status', 'sess-1', false)
+  }
+  assert.deepEqual(pushes.slice(0, 2).map(push => push.env), ['sandbox', 'production'])
+  const sent = pushes[1]!
+  assert.equal(sent.token, token)
+  assert.equal(sent.headers['apns-topic'], 'ai.example.duo')
+  assert.match(sent.headers.authorization!, /^bearer [\w-]+\.[\w-]+\.[\w-]+$/)
+  const payload = JSON.parse(sent.body) as { aps: { category: string; 'mutable-content': number }; e: string }
+  assert.equal(payload.aps['mutable-content'], 1)
+  assert.equal(payload.aps.category, 'TURN')
+  const opened = phone.sealer.open(payload.e) as { kind: string; sessionId: string; title: string }
+  assert.deepEqual([opened.kind, opened.sessionId, opened.title], ['turn', 'sess-1', 'Fix the login bug'])
+
+  // The working environment is remembered for the next push.
+  const devices = JSON.parse(await readFile(join(home, 'duo-remote', 'devices.json'), 'utf8')) as Record<string, { env: string }>
+  assert.equal(devices['iphone-duo-1']!.env, 'production')
 })

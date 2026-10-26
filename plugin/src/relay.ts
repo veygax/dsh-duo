@@ -10,12 +10,6 @@ export interface RelayLinkOptions {
   readonly log: { info(message: string): void; warn(message: string): void }
 }
 
-export interface PushMeta {
-  readonly category?: string
-  readonly thread?: string
-  readonly collapse?: string
-}
-
 const PING_MS = 20_000
 const MAX_BACKOFF_MS = 30_000
 
@@ -62,11 +56,6 @@ export class RelayLink {
   /** Send one sealed body to a device, or to every device when `to` is omitted. */
   send(sealed: string, to?: string): void {
     this.raw(to === undefined ? { t: 'msg', d: sealed } : { t: 'msg', to, d: sealed })
-  }
-
-  /** Ask the relay to push one sealed notification to every registered, disconnected device. */
-  push(sealed: string, meta: PushMeta = {}): void {
-    this.raw({ t: 'push', d: sealed, ...meta })
   }
 
   private raw(frame: object): void {

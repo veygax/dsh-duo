@@ -6,11 +6,13 @@
 
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
+import { dirname, join } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
 import { Directory, type QuestionView, type SessionView } from './directory.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent, HostContext } from './host.ts'
 import { loadPairing, pairingLink, pairingPath, pairingQr, savePairing, type Pairing } from './pairing.ts'
 import { RelayLink } from './relay.ts'
+import { ApnsSender, DeviceTokens, http2Transport, loadApns, type ApnsTransport, type PushMessage } from './push.ts'
 import { Remote, RemoteFailure, failureOf } from './remote.ts'
 import { LiveReducer, Transcript, type Item, type WireEvent } from './transcript.ts'
 
@@ -23,6 +25,8 @@ export interface BridgeConfig {
   /** Hold DeepSeek questions for the phone even when no Web client answers. */
   readonly holdQuestions: boolean
   readonly historyMessages: number
+  /** APNs delivery; tests substitute a fake. Defaults to HTTP/2 straight to Apple. */
+  readonly apnsTransport?: ApnsTransport
 }
 
 interface Log {
@@ -94,6 +98,9 @@ export class Bridge {
   private sealer!: Sealer
   private link: RelayLink | undefined
   private readonly disposers: (() => unknown)[] = []
+  private tokens!: DeviceTokens
+  private apns: ApnsSender | undefined
+  private transport: ApnsTransport | undefined
 
   constructor(ctx: HostContext, config: BridgeConfig, log: Log) {
     this.ctx = ctx
@@ -112,9 +119,23 @@ export class Bridge {
     return pairingPath(this.config.home)
   }
 
+  /** Written by `ios/scripts/install.sh` when it signs the app: this Mac's own Apple push key. */
+  get apnsFile(): string {
+    return join(dirname(this.pairingFile), 'apns.json')
+  }
+
   async start(): Promise<void> {
     this.pairing = await loadPairing(this.pairingFile, this.config.relay)
     this.sealer = new Sealer(Buffer.from(this.pairing.secret, 'base64url'))
+    this.tokens = new DeviceTokens(join(dirname(this.pairingFile), 'devices.json'))
+    await this.tokens.load()
+    this.transport = this.config.apnsTransport ?? http2Transport()
+    try {
+      this.apns = await loadApns(this.apnsFile, this.transport)
+    } catch (error) {
+      this.log.warn(`duo: push disabled, ${this.apnsFile} is unreadable: ${String(error)}`)
+    }
+    if (this.apns !== undefined) this.log.info(`duo: push notifications on (${this.apns.topic})`)
     this.listen()
     this.link = new RelayLink({
       relay: this.pairing.relay,
@@ -137,6 +158,7 @@ export class Bridge {
     for (const follow of this.follows.values()) follow.controller.abort()
     this.follows.clear()
     this.link?.stop()
+    if (this.config.apnsTransport === undefined) (this.transport as { close?: () => void } | undefined)?.close?.()
     await this.remote.dispose().catch(() => undefined)
   }
 
@@ -152,6 +174,7 @@ export class Bridge {
       `Relay: ${this.pairing.relay} (${this.link?.connected === true ? 'connected' : 'offline'})`,
       `Phones online: ${devices}`,
       `Paired before: ${this.pairing.paired === true ? 'yes' : 'no'}`,
+      `Push: ${this.apns === undefined ? `off (run ios/scripts/install.sh with an APNs key; reads ${this.apnsFile})` : `on (${this.apns.topic}, ${this.tokens.entries().length} phone(s))`}`,
       `Pairing file: ${this.pairingFile}`,
     ].join('\n')
   }
@@ -323,8 +346,21 @@ export class Bridge {
     for (const device of follow.devices) this.link?.send(sealed, device)
   }
 
-  private push(payload: Json, meta: { category: string; thread: string; collapse: string }): void {
-    this.link?.push(this.sealer.seal(payload), meta)
+  /** Push to every registered phone that is not connected right now (a connected one got the live event). */
+  private push(payload: Json, meta: Omit<PushMessage, 'sealed'>): void {
+    const apns = this.apns
+    if (apns === undefined) return
+    const message: PushMessage = { sealed: this.sealer.seal(payload), ...meta }
+    for (const [deviceId, token] of this.tokens.entries()) {
+      if (this.link?.devices.has(deviceId) === true) continue
+      apns.send(token, message).then(
+        async (result) => {
+          if (result === 'dead') await this.tokens.remove(deviceId)
+          else await this.tokens.save()
+        },
+        (error: unknown) => this.log.warn(`duo: push to ${deviceId} failed: ${String(error)}`),
+      )
+    }
   }
 
   private async receive(from: string, sealed: string): Promise<void> {
@@ -357,6 +393,7 @@ export class Bridge {
           presets,
           sessions: this.directory.sessions(),
           workspaces: this.directory.workspaces(),
+          push: { enabled: this.apns !== undefined, ...this.apns === undefined ? {} : { topic: this.apns.topic } },
         }
       }
       case 'sessions.list':
@@ -440,6 +477,18 @@ export class Bridge {
         return await this.commands(str(m.sessionId, 'sessionId'))
       case 'question.answer':
         return await this.answer(str(m.sessionId, 'sessionId'), str(m.callId, 'callId'), m.answers)
+      case 'push.register': {
+        const token = str(m.token, 'token').toLowerCase()
+        if (!/^[0-9a-f]{32,200}$/.test(token)) throw new RemoteFailure('duo/bad-request', 'token must be hex')
+        await this.tokens.set(device, token, m.env === 'production' ? 'production' : 'sandbox')
+        if (typeof m.topic === 'string' && this.apns !== undefined && m.topic !== this.apns.topic) {
+          this.log.warn(`duo: phone app ${m.topic} differs from the APNs topic ${this.apns.topic}; pushes will be refused`)
+        }
+        return { enabled: this.apns !== undefined }
+      }
+      case 'push.unregister':
+        await this.tokens.remove(device)
+        return null
       case 'pairing.status':
         return { relay: this.pairing.relay, devices: [...this.link?.devices ?? []] }
       default:

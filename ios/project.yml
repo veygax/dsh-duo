@@ -12,15 +12,21 @@ settings:
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT: YES
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     TARGETED_DEVICE_FAMILY: "1"
+    # Each person signs their own copy: ios/scripts/install.sh overrides these two.
+    DSH_BUNDLE_ID: ai.deepseek.harness.duo
+    DEVELOPMENT_TEAM: ""
 targets:
   DSHDuo:
     type: application
     platform: iOS
+    attributes:
+      SystemCapabilities:
+        com.apple.Push:
+          enabled: 1
     sources:
       - path: App
         excludes:
@@ -33,12 +39,13 @@ targets:
       path: App/DSHDuo.entitlements
       properties:
         aps-environment: development
-        com.apple.security.application-groups:
-          - group.ai.deepseek.harness.duo
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(DSH_BUNDLE_ID).shared
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: DSH Duo
+        DSHKeychainGroup: $(AppIdentifierPrefix)$(DSH_BUNDLE_ID).shared
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UIApplicationSceneManifest:
@@ -59,7 +66,7 @@ targets:
               - dshduo
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.deepseek.harness.duo
+        PRODUCT_BUNDLE_IDENTIFIER: $(DSH_BUNDLE_ID)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     dependencies:
@@ -74,18 +81,19 @@ targets:
     entitlements:
       path: NotificationService/DSHDuoNotifications.entitlements
       properties:
-        com.apple.security.application-groups:
-          - group.ai.deepseek.harness.duo
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(DSH_BUNDLE_ID).shared
     info:
       path: NotificationService/Info.plist
       properties:
         CFBundleDisplayName: DSH Duo Notifications
+        DSHKeychainGroup: $(AppIdentifierPrefix)$(DSH_BUNDLE_ID).shared
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.deepseek.harness.duo.notifications
+        PRODUCT_BUNDLE_IDENTIFIER: $(DSH_BUNDLE_ID).notifications
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
   DSHDuoTests:
     type: bundle.unit-test
@@ -96,7 +104,7 @@ targets:
       - target: DSHDuo
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.deepseek.harness.duo.tests
+        PRODUCT_BUNDLE_IDENTIFIER: $(DSH_BUNDLE_ID).tests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/DSHDuo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DSHDuo
         BUNDLE_LOADER: $(TEST_HOST)

@@ -5,7 +5,7 @@ Three parties take part:
 | Party | Lives | Role |
 |---|---|---|
 | **Host** | `dsh-plugin-duo-remote`, inside the `dsh` process | Owns the dsh session API; dials out to the relay |
-| **Relay** | `relay/` (Node or Cloudflare Worker), public | Forwards opaque ciphertext between Host and Devices; sends APNs pushes |
+| **Relay** | `relay/` (Node or Cloudflare Worker), public | Forwards opaque ciphertext between Host and Devices; holds no secrets |
 | **Device** | `ios/` app (and its Notification Service Extension) | The phone |
 
 Neither the Host nor the Device accepts inbound connections, so no VPN, port
@@ -55,8 +55,6 @@ Relay frames are JSON text:
 | Host → Relay | `{ "t": "msg", "to"?: "<deviceId>", "d" }` → delivered to that Device (or all) as `{ "t": "msg", "d" }` |
 | Relay → Host | `{ "t": "device", "id", "online": bool }` |
 | Relay → Device | `{ "t": "host", "online": bool }` |
-| Device → Relay | `{ "t": "push-register", "token": "<hex>", "env": "sandbox"\|"production" }`, `{ "t": "push-unregister" }` |
-| Host → Relay | `{ "t": "push", "d": "<sealed>", "category"?, "thread"?, "collapse"? }` |
 | any | `{ "t": "ping" }` → `{ "t": "pong" }` |
 
 HTTP `POST /v1/rooms/<roomId>/send` with `Authorization: Bearer <relay-auth>`
@@ -64,8 +62,13 @@ and body `{ "device": "<id>", "d": "<sealed>" }` delivers one message to the
 Host without a socket (used by notification quick replies). `202` on delivery,
 `503` when the Host is offline.
 
-Pushes go to every registered device that is not currently connected. The APNs
-payload carries only `{"aps":{"alert":{"title":"DeepSeek Harness","body":"New activity"},"mutable-content":1,...},"e":"<sealed>"}`;
+## 3a. Push notifications
+
+The relay is not involved. A Device registers its APNs token with its Host (`push.register`,
+sealed like any request). The Host holds the APNs key of the team that signed that copy of
+the app (`$DSH_HOME/duo-remote/apns.json`, written by `ios/scripts/install.sh`) and sends
+pushes directly to Apple for registered Devices the relay reports offline. The APNs payload
+carries only `{"aps":{"alert":{"title":"DeepSeek Harness","body":"New activity"},"mutable-content":1,...},"e":"<sealed>"}`;
 the Notification Service Extension decrypts `e` and rewrites the alert.
 
 ## 4. Application messages (inside `d`)
@@ -80,7 +83,7 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 
 | op | params | value |
 |---|---|---|
-| `hello` | `device: { name, model }` | `{ host, version, presets, workspaces, sessions }` |
+| `hello` | `device: { name, model }` | `{ host, version, presets, workspaces, sessions, push: { enabled, topic? } }` |
 | `sessions.list` | — | `Session[]` |
 | `workspaces.list` | — | `Workspace[]` |
 | `workspaces.add` | `path` | `Workspace` |
@@ -95,6 +98,7 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `session.rename` | `sessionId`, `title` | — |
 | `models.catalog` | — | `{ default, groups: [{ id, name, models: [{ id, name, description?, efforts: [{ id, name }], defaultEffort? }] }] }` |
 | `commands.list` | `sessionId` | `[{ name, description, hint?, kind: "command"\|"skill" }]` |
+| `push.register` | `token`, `env: "sandbox"\|"production"`, `topic` | `{ enabled }` |
 | `question.answer` | `sessionId`, `callId`, `answers: [{ id, selected: [], custom? }]` | `{ accepted }` |
 
 ### Events

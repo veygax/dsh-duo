@@ -1,20 +1,17 @@
 /**
  * Self-hosted relay: `node src/node.ts` (Node 22.18+ runs TypeScript directly).
  *
- * Env: PORT (8787), DATA_DIR (./data), APNS_KEY_ID, APNS_TEAM_ID,
- * APNS_PRIVATE_KEY, APNS_TOPIC. Put TLS in front (Caddy, Fly, Render, ...).
+ * Env: PORT (8787), DATA_DIR (./data). Put TLS in front (Caddy, Fly, Render, ...).
  */
 
 import { createServer, type IncomingMessage } from 'node:http'
-import { connect, type ClientHttp2Session } from 'node:http2'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { apnsConfigFrom, createApnsSender, type ApnsPost } from './apns.ts'
 import {
   admit, announceDevice, announceHost, greetDevice, greetHost, MAX_DEVICES, MAX_FRAME_BYTES,
   onDeviceFrame, onDevicePost, onHostFrame, validAuth, validDeviceId, validRoomId,
-  type PushSender, type RoomContext, type RoomRecord, type RoomSockets, type RoomStore, type Sock,
+  type RoomContext, type RoomRecord, type RoomSockets, type RoomStore, type Sock,
 } from './room.ts'
 
 const port = Number(process.env.PORT ?? 8787)
@@ -75,37 +72,8 @@ function roomFor(id: string): NodeRoom {
   return room
 }
 
-/** APNs over a pooled HTTP/2 session per host. */
-const sessions = new Map<string, ClientHttp2Session>()
-const http2Post: ApnsPost = (url, headers, body) => new Promise((resolve, reject) => {
-  const target = new URL(url)
-  let session = sessions.get(target.origin)
-  if (session === undefined || session.closed || session.destroyed) {
-    session = connect(target.origin)
-    session.on('error', () => sessions.delete(target.origin))
-    session.on('close', () => sessions.delete(target.origin))
-    sessions.set(target.origin, session)
-  }
-  const request = session.request({ ':method': 'POST', ':path': target.pathname, ...headers })
-  let status = 0
-  let text = ''
-  request.setEncoding('utf8')
-  request.on('response', (head) => { status = Number(head[':status']) })
-  request.on('data', (chunk: string) => { text += chunk })
-  request.on('error', reject)
-  request.on('end', () => {
-    let reason: string | undefined
-    try { reason = (JSON.parse(text) as { reason?: string }).reason } catch { /* empty body on success */ }
-    resolve({ status, reason })
-  })
-  request.end(body)
-})
-
-const apns = apnsConfigFrom(process.env)
-const push: PushSender | undefined = apns === undefined ? undefined : createApnsSender(apns, http2Post)
-
 function contextFor(room: NodeRoom): RoomContext {
-  return { store: room.store, sockets: room, push }
+  return { store: room.store, sockets: room }
 }
 
 async function readBody(request: IncomingMessage): Promise<string> {
@@ -125,7 +93,7 @@ const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://relay')
   if (url.pathname === '/healthz') {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end(JSON.stringify({ ok: true, push: push !== undefined, rooms: rooms.size }))
+    response.end(JSON.stringify({ ok: true, rooms: rooms.size }))
     return
   }
   const match = ROOM_PATH.exec(url.pathname)
@@ -206,5 +174,5 @@ setInterval(() => {
 }, 25_000).unref()
 
 server.listen(port, () => {
-  console.log(`dsh-duo relay listening on :${port} (push ${push === undefined ? 'disabled' : 'enabled'})`)
+  console.log(`dsh-duo relay listening on :${port}`)
 })

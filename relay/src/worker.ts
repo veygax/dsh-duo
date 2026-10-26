@@ -1,23 +1,17 @@
 /**
  * Cloudflare Workers relay: one Durable Object per room, using the WebSocket
  * Hibernation API so idle rooms cost nothing. Deploy with `npx wrangler deploy`.
- *
- * Secrets (optional, enable pushes): APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY, APNS_TOPIC.
+ * It holds no secrets: message bodies are sealed and each Host sends its own pushes.
  */
 
-import { apnsConfigFrom, createApnsSender } from './apns.ts'
 import {
   admit, announceDevice, announceHost, greetDevice, greetHost, MAX_DEVICES,
   onDeviceFrame, onDevicePost, onHostFrame, validAuth, validDeviceId, validRoomId,
-  type PushSender, type RoomContext, type RoomRecord, type RoomSockets, type RoomStore, type Sock,
+  type RoomContext, type RoomRecord, type RoomSockets, type RoomStore, type Sock,
 } from './room.ts'
 
 interface Env {
   ROOMS: DurableObjectNamespace
-  APNS_KEY_ID?: string
-  APNS_TEAM_ID?: string
-  APNS_PRIVATE_KEY?: string
-  APNS_TOPIC?: string
 }
 
 interface Attachment {
@@ -30,9 +24,7 @@ const ROOM_PATH = /^\/v1\/rooms\/([A-Za-z0-9_-]+)(\/send)?$/
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
-    if (url.pathname === '/healthz') {
-      return Response.json({ ok: true, push: apnsConfigFrom(env as unknown as Record<string, string>) !== undefined })
-    }
+    if (url.pathname === '/healthz') return Response.json({ ok: true })
     const match = ROOM_PATH.exec(url.pathname)
     if (match === null || !validRoomId(match[1]!)) return new Response('not found', { status: 404 })
     return await env.ROOMS.get(env.ROOMS.idFromName(match[1]!)).fetch(request)
@@ -40,19 +32,10 @@ export default {
 }
 
 export class Room implements DurableObject {
-  private readonly push: PushSender | undefined
   private readonly state: DurableObjectState
 
-  constructor(state: DurableObjectState, env: Env) {
+  constructor(state: DurableObjectState) {
     this.state = state
-    const config = apnsConfigFrom(env as unknown as Record<string, string>)
-    this.push = config === undefined ? undefined : createApnsSender(config, async (target, headers, body) => {
-      const response = await fetch(target, { method: 'POST', headers, body })
-      const text = await response.text()
-      let reason: string | undefined
-      try { reason = (JSON.parse(text) as { reason?: string }).reason } catch { /* empty on success */ }
-      return { status: response.status, reason }
-    })
   }
 
   private readonly store: RoomStore = {
@@ -60,17 +43,22 @@ export class Room implements DurableObject {
     save: async (record) => { await this.state.storage.put('room', record) },
   }
 
+  /** Newest open socket for a tag; a replaced socket lingers in the list until its close completes. */
+  private open(tag: string): WebSocket | undefined {
+    return this.state.getWebSockets(tag).filter(ws => ws.readyState === WebSocket.OPEN).at(-1)
+  }
+
   private readonly sockets: RoomSockets = {
-    host: () => this.state.getWebSockets('host')[0],
-    device: (id: string) => this.state.getWebSockets(`device:${id}`)[0],
-    devices: () => this.state.getWebSockets('device').map((ws) => {
+    host: () => this.open('host'),
+    device: (id: string) => this.open(`device:${id}`),
+    devices: () => this.state.getWebSockets('device').filter(ws => ws.readyState === WebSocket.OPEN).map((ws) => {
       const attachment = ws.deserializeAttachment() as Attachment
       return [attachment.device!, ws as Sock] as const
     }),
   }
 
   private context(): RoomContext {
-    return { store: this.store, sockets: this.sockets, push: this.push }
+    return { store: this.store, sockets: this.sockets }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -120,8 +108,8 @@ export class Room implements DurableObject {
   async webSocketClose(ws: WebSocket): Promise<void> {
     const attachment = ws.deserializeAttachment() as Attachment
     if (attachment.role === 'host') {
-      if (this.state.getWebSockets('host').every(other => other === ws)) announceHost(this.sockets, false)
-    } else if (attachment.device !== undefined) {
+      if (this.open('host') === undefined) announceHost(this.sockets, false)
+    } else if (attachment.device !== undefined && this.open(`device:${attachment.device}`) === undefined) {
       announceDevice(this.sockets, attachment.device, false)
     }
   }

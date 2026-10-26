@@ -2,7 +2,8 @@
  * Transport-neutral room logic shared by the Node and Cloudflare adapters.
  *
  * A room joins one Host (the dsh plugin) with any number of Devices. Message
- * bodies are sealed end to end; the relay only reads the routing envelope.
+ * bodies are sealed end to end; the relay only reads the routing envelope and
+ * holds no Apple credentials (each Host sends its own pushes).
  */
 
 /** Minimal socket surface both runtimes provide. */
@@ -11,18 +12,10 @@ export interface Sock {
   close(code?: number, reason?: string): void
 }
 
-/** One APNs registration owned by a device. */
-export interface PushRegistration {
-  readonly token: string
-  readonly env: 'sandbox' | 'production'
-  readonly updatedAt: number
-}
-
 /** Durable room state. Only a hash of the room credential is ever stored. */
 export interface RoomRecord {
   readonly authHash: string
   readonly createdAt: number
-  readonly push: Record<string, PushRegistration>
 }
 
 export interface RoomStore {
@@ -37,24 +30,10 @@ export interface RoomSockets {
   devices(): Iterable<readonly [string, Sock]>
 }
 
-/** Outgoing APNs notification with an opaque sealed body. */
-export interface PushRequest {
-  readonly sealed: string
-  readonly category?: string
-  readonly thread?: string
-  readonly collapse?: string
-}
-
-export interface PushSender {
-  /** @returns tokens APNs rejected permanently, to be forgotten. */
-  send(registrations: readonly PushRegistration[], request: PushRequest): Promise<readonly string[]>
-}
-
 export const MAX_FRAME_BYTES = 4 * 1024 * 1024
 export const MAX_DEVICES = 16
 const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/
 const AUTH_PATTERN = /^[0-9a-f]{64}$/
-const TOKEN_PATTERN = /^[0-9a-f]{32,200}$/
 
 export function validRoomId(id: string): boolean {
   return ID_PATTERN.test(id)
@@ -93,7 +72,7 @@ export async function admit(store: RoomStore, role: 'host' | 'device', auth: str
   const record = await store.load()
   if (record === undefined) {
     if (role === 'device') return { ok: false, status: 404 }
-    const created: RoomRecord = { authHash: hash, createdAt: Date.now(), push: {} }
+    const created: RoomRecord = { authHash: hash, createdAt: Date.now() }
     await store.save(created)
     return { ok: true, record: created }
   }
@@ -147,7 +126,6 @@ export function greetDevice(sockets: RoomSockets, sock: Sock): void {
 export interface RoomContext {
   readonly store: RoomStore
   readonly sockets: RoomSockets
-  readonly push: PushSender | undefined
 }
 
 export async function onHostFrame(room: RoomContext, sock: Sock, text: string): Promise<void> {
@@ -168,28 +146,6 @@ export async function onHostFrame(room: RoomContext, sock: Sock, text: string): 
       for (const [, device] of room.sockets.devices()) trySend(device, { t: 'msg', d: body })
       return
     }
-    case 'push': {
-      const sealed = str(frame.d, 3000)
-      if (sealed === undefined || room.push === undefined) return
-      const record = await room.store.load()
-      if (record === undefined) return
-      const targets = Object.entries(record.push)
-        .filter(([deviceId]) => room.sockets.device(deviceId) === undefined)
-        .map(([, registration]) => registration)
-      if (targets.length === 0) return
-      const dead = await room.push.send(targets, {
-        sealed,
-        category: str(frame.category, 64),
-        thread: str(frame.thread, 64),
-        collapse: str(frame.collapse, 64),
-      })
-      if (dead.length === 0) return
-      const fresh = await room.store.load()
-      if (fresh === undefined) return
-      const push = Object.fromEntries(Object.entries(fresh.push).filter(([, item]) => !dead.includes(item.token)))
-      await room.store.save({ ...fresh, push })
-      return
-    }
     default:
   }
 }
@@ -205,26 +161,6 @@ export async function onDeviceFrame(room: RoomContext, sock: Sock, deviceId: str
       const body = str(frame.d)
       if (body === undefined) return
       if (!trySend(room.sockets.host(), { t: 'msg', from: deviceId, d: body })) trySend(sock, { t: 'host', online: false })
-      return
-    }
-    case 'push-register': {
-      const token = str(frame.token, 200)?.toLowerCase()
-      const env: PushRegistration['env'] = frame.env === 'production' ? 'production' : 'sandbox'
-      if (token === undefined || !TOKEN_PATTERN.test(token)) return
-      const record = await room.store.load()
-      if (record === undefined) return
-      const others = Object.entries(record.push).filter(([id, item]) => id !== deviceId && item.token !== token)
-      if (others.length >= MAX_DEVICES) others.sort((a, b) => a[1].updatedAt - b[1].updatedAt).shift()
-      const entry: PushRegistration = { token, env, updatedAt: Date.now() }
-      const push: Record<string, PushRegistration> = Object.fromEntries([...others, [deviceId, entry]])
-      await room.store.save({ ...record, push })
-      return
-    }
-    case 'push-unregister': {
-      const record = await room.store.load()
-      if (record === undefined || record.push[deviceId] === undefined) return
-      const push = Object.fromEntries(Object.entries(record.push).filter(([id]) => id !== deviceId))
-      await room.store.save({ ...record, push })
       return
     }
     default:

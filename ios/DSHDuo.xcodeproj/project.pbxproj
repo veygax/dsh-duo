@@ -33,11 +33,13 @@
 		B5A4DA16A844661EBAFDD3BD /* NewSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114705792DD8A39638541EBB /* NewSessionSheet.swift */; };
 		BEAA77104C8E78D01D8569BF /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3DACBF40F694448B714D2D5 /* RootView.swift */; };
 		C03CDE8D56FCF0DCCFC67FD2 /* DuoCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED92AE61B24458488741F75D /* DuoCrypto.swift */; };
+		C2D7D17735DC1AB7A0E455E5 /* PushEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */; };
 		C2F332D691F6FDF6222313FF /* Modes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453A60DAD6812DA45F24B916 /* Modes.swift */; };
 		C80B01E3719CA8C3830D6ADA /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4B6FE651B773D4D13315B49 /* SidebarView.swift */; };
 		CAD9AD78B6C51ACC000F6E18 /* QuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A284AF9B6EDDA7D9A2A6BF0 /* QuestionCard.swift */; };
 		D7060494C2F49894DE027C05 /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A5D605C2EC1AF5105D8B98 /* Menus.swift */; };
 		D7E89D346E2DC2A6EC946269 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBD7BF708D121970A5BA6A2 /* Models.swift */; };
+		DB8053D6FB971CF4CD518EDF /* PushEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */; };
 		E978BF499DCEDB8E019A221E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3695CDB13A5BD8C6BA16208 /* SettingsView.swift */; };
 		EB760A5E9358BDD0B34E647B /* RelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1776AEA301FA6D6F36488120 /* RelayClient.swift */; };
 		EF8397EC0DD99F1BC88E9573 /* HostStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9751642E78B9CCD05F8E67BB /* HostStore.swift */; };
@@ -114,6 +116,7 @@
 		ED92AE61B24458488741F75D /* DuoCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoCrypto.swift; sourceTree = "<group>"; };
 		F3695CDB13A5BD8C6BA16208 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F4B6FE651B773D4D13315B49 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushEnvironment.swift; sourceTree = "<group>"; };
 		F6ACA182D9C68A5317907153 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		FEBD7BF708D121970A5BA6A2 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -144,6 +147,7 @@
 			children = (
 				ED92AE61B24458488741F75D /* DuoCrypto.swift */,
 				398F723FF55C9BCFBBE97519 /* PairingStore.swift */,
+				F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */,
 				94D594302B722D7E193A46A3 /* PushPayload.swift */,
 			);
 			path = Shared;
@@ -342,6 +346,7 @@
 					A332E83A5F1B0CBEE3ACF74C = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = "[\"com.apple.Push\": [\"enabled\": 1]]";
 					};
 					AD5D03F2B5EEE817091DB54D = {
 						DevelopmentTeam = "";
@@ -406,6 +411,7 @@
 				04F0449ACA8842D2E76DB5DE /* Notifier.swift in Sources */,
 				87D51B77C955D596BF07F7EC /* PairingStore.swift in Sources */,
 				9437A6FED8D486FDB5E1AE88 /* PairingView.swift in Sources */,
+				DB8053D6FB971CF4CD518EDF /* PushEnvironment.swift in Sources */,
 				988704D34B3195596F14E2AE /* PushPayload.swift in Sources */,
 				0DADEB89DCC22902DDB9B2EA /* QRScannerView.swift in Sources */,
 				CAD9AD78B6C51ACC000F6E18 /* QuestionCard.swift in Sources */,
@@ -425,6 +431,7 @@
 				C03CDE8D56FCF0DCCFC67FD2 /* DuoCrypto.swift in Sources */,
 				683D2B68220F31F50CA5C423 /* NotificationService.swift in Sources */,
 				39351F61912BC2FFBA76C814 /* PairingStore.swift in Sources */,
+				C2D7D17735DC1AB7A0E455E5 /* PushEnvironment.swift in Sources */,
 				6741E703B4D843FCC64B4C65 /* PushPayload.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -463,7 +470,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.deepseek.harness.duo.notifications;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(DSH_BUNDLE_ID).notifications";
 				SDKROOT = iphoneos;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -508,6 +515,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
+				DSH_BUNDLE_ID = ai.deepseek.harness.duo;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -547,7 +555,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.deepseek.harness.duo;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(DSH_BUNDLE_ID)";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -563,7 +571,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.deepseek.harness.duo.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(DSH_BUNDLE_ID).tests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DSHDuo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DSHDuo";
@@ -608,6 +616,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
+				DSH_BUNDLE_ID = ai.deepseek.harness.duo;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -654,7 +663,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.deepseek.harness.duo;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(DSH_BUNDLE_ID)";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -670,7 +679,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.deepseek.harness.duo.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(DSH_BUNDLE_ID).tests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DSHDuo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DSHDuo";
@@ -687,7 +696,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.deepseek.harness.duo.notifications;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(DSH_BUNDLE_ID).notifications";
 				SDKROOT = iphoneos;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -7,13 +7,17 @@
 import { hostname } from 'node:os'
 import { Bridge, VERSION } from './bridge.ts'
 import type { HostContext, Logger } from './host.ts'
+import type { ApnsTransport } from './push.ts'
 import { dshHome, pairingLink, pairingPath, pairingQr, rotatePairing } from './pairing.ts'
+
+/** Public relay used when neither the plugin row nor `$DSH_DUO_RELAY` names one. It only ever sees ciphertext. */
+export const DEFAULT_RELAY = 'https://dsh-duo-relay.cloudflare-hybrid809.workers.dev'
 
 export const name = 'duo-remote'
 export const inject = ['typertGateway', 'connection']
 
 export interface Config {
-  /** Relay base URL, e.g. `https://dsh-duo-relay.example.workers.dev`. Falls back to `$DSH_DUO_RELAY`. */
+  /** Relay base URL. Falls back to `$DSH_DUO_RELAY`, then the public {@link DEFAULT_RELAY}. */
   relay?: string
   /** Name the phone shows for this machine; defaults to the host name. */
   hostName?: string
@@ -21,6 +25,8 @@ export interface Config {
   holdQuestions?: boolean
   /** Messages loaded when a Session opens. Default 200. */
   historyMessages?: number
+  /** Test hook: replaces the HTTP/2 connection to Apple. */
+  apnsTransport?: ApnsTransport
 }
 
 function loggerOf(ctx: HostContext): { info(message: string): void; warn(message: string): void } {
@@ -34,11 +40,7 @@ function loggerOf(ctx: HostContext): { info(message: string): void; warn(message
 
 export function apply(ctx: HostContext, config: Config = {}): void {
   const log = loggerOf(ctx)
-  const relay = config.relay ?? process.env.DSH_DUO_RELAY
-  if (relay === undefined || relay === '') {
-    log.warn('duo-remote: no relay configured. Set `relay` on the duo-remote row or DSH_DUO_RELAY; see the plugin README.')
-    return
-  }
+  const relay = config.relay || process.env.DSH_DUO_RELAY || DEFAULT_RELAY
   const home = dshHome(ctx.get('profileContext')?.home)
   const bridge = new Bridge(ctx, {
     relay,
@@ -46,6 +48,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     hostName: config.hostName ?? hostname(),
     holdQuestions: config.holdQuestions ?? true,
     historyMessages: config.historyMessages ?? 200,
+    ...config.apnsTransport === undefined ? {} : { apnsTransport: config.apnsTransport },
   }, log)
 
   const started = bridge.start().catch((error: unknown) => {

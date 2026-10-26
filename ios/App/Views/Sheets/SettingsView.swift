@@ -25,6 +25,9 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Notifications", value: notificationText)
+                    if let enabled = store.pushEnabledOnHost {
+                        LabeledContent("When the app is closed", value: enabled ? "Sent by \(store.hostName)" : "Not set up")
+                    }
                     if notifications == .denied {
                         Button("Open Settings", systemImage: "gear", action: tap {
                             if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
@@ -35,7 +38,9 @@ struct SettingsView: View {
                         })
                     }
                 } footer: {
-                    Text("You're notified when a turn finishes or DeepSeek asks a question, and can reply right from the notification.")
+                    Text(store.pushEnabledOnHost == false
+                         ? "While the app is open you're notified about other sessions. To also get notifications when it's closed, install this app with ios/scripts/install.sh and an APNs key from your team."
+                         : "You're notified when a turn finishes or DeepSeek asks a question, and can reply right from the notification.")
                 }
 
                 Section {

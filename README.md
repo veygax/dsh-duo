@@ -6,7 +6,9 @@ guidelines. Install the companion plugin on the machine that runs dsh, scan a QR
 anywhere: no VPN, no port forwarding, end-to-end encrypted.
 
 ```
- iPhone Duo app  ──wss──▶  relay (forwards ciphertext, sends APNs)  ◀──wss──  dsh + dsh-plugin-duo-remote
+ iPhone Duo app  ──wss──▶  relay (forwards ciphertext)  ◀──wss──  dsh + dsh-plugin-duo-remote
+       ▲                                                             │
+       └──────────── APNs push, signed with your own team's key ─────┘
 ```
 
 Both ends dial **out** to the relay, so neither needs a public address. Every message is sealed with AES-256-GCM using a
@@ -17,7 +19,7 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 |---|---|
 | [`ios/`](ios) | SwiftUI app, Notification Service Extension, unit tests (XcodeGen `project.yml` + generated `.xcodeproj`) |
 | [`plugin/`](plugin) | `dsh-plugin-duo-remote`: the dsh bundle the phone talks to |
-| [`relay/`](relay) | Zero-trust WebSocket relay + APNs sender (Node or Cloudflare Workers) |
+| [`relay/`](relay) | Zero-trust WebSocket relay (Node or Cloudflare Workers); holds no secrets |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Pairing, key derivation, relay frames, app messages |
 
 ## What the app does
@@ -39,8 +41,9 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - **Slash commands, listed automatically.** Type `/` (or tap the slash button) to get the session's dsh commands and
   skills, filtered as you type. Commands run on the Host without a model turn.
 - **Notifications.** You're notified when a turn finishes or when DeepSeek asks a question, with inline **Reply** /
-  **Answer** actions. In the foreground these are local notifications for sessions you aren't viewing. In the
-  background they arrive as relay APNs pushes that the Notification Service Extension decrypts on the phone.
+  **Answer** actions. In the foreground these are local notifications for sessions you aren't viewing. When the app
+  is closed, your Mac's dsh plugin sends them through APNs with the push key of the team that signed your copy of the
+  app; the Notification Service Extension decrypts them on the phone. No Apple key ever reaches the shared relay.
 - **Questions.** DeepSeek's `ask_user_question` appears as a card above the composer. A single choice answers in one
   tap.
 - **Haptics on every button.** Taps, selections, success, warning, error, and a two-beat "attention" pattern for
@@ -82,27 +85,28 @@ Follows Apple's [Liquid Glass](https://developer.apple.com/documentation/technol
 
 ## Quick start
 
-1. **Relay.** Deploy once, anywhere public. See [relay/README.md](relay/README.md). The Cloudflare Workers free tier works:
-
-   ```bash
-   cd relay && npm install && npx wrangler deploy
-   ```
-
-2. **Plugin.** On the machine running dsh:
+1. **Plugin.** On the machine running dsh:
 
    ```bash
    dsh plugin add dsh-plugin-duo-remote
    ```
 
-   Then set the relay (env or profile patch, see [plugin/README.md](plugin/README.md)) and start dsh:
+   Start dsh (`dsh web` or the desktop app). A pairing QR code prints in the terminal; `dsh-duo pair` shows it again.
+   The plugin uses the public relay at `https://dsh-duo-relay.cloudflare-hybrid809.workers.dev` by default, so there is
+   nothing else to set up. It only ever carries ciphertext. To run your own relay instead, see
+   [relay/README.md](relay/README.md) and set `DSH_DUO_RELAY` or the plugin's `relay` option.
+
+2. **App.** Connect your iPhone Duo and sign your own copy with the team signed in to Xcode:
 
    ```bash
-   DSH_DUO_RELAY=https://dsh-duo-relay.<you>.workers.dev dsh web
+   ios/scripts/install.sh --apns-key ~/Downloads/AuthKey_XXXXXXXXXX.p8
    ```
 
-   A pairing QR code prints in the terminal; `dsh-duo pair` shows it again.
-
-3. **App.** Open `ios/DSHDuo.xcodeproj`, set your team, and run on iPhone Duo. Scan the QR code, or paste the link.
+   This archives with automatic signing (bundle ID `ai.deepseek.harness.duo.<your team id>`), exports a signed `.ipa`
+   to `ios/build/export/`, installs it on the connected iPhone and launches it. With `--apns-key` (an APNs key from
+   developer.apple.com, Certificates, IDs & Profiles, Keys), it also stores that key in `~/.dsh/duo-remote/` so your dsh
+   can push to this app while it's closed. Restart dsh afterwards. Without the key everything works except
+   notifications while the app is closed. Then scan the pairing QR code, or paste the link.
 
 ## Developing without a DeepSeek key
 
