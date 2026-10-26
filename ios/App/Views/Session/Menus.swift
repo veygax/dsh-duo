@@ -36,10 +36,11 @@ struct ModeMenu: View {
         } label: {
             Label(current.name, systemImage: current.symbol)
                 .font(.footnote.weight(.medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.fill.tertiary, in: .capsule)
         }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
         .menuOrder(.fixed)
         .accessibilityLabel("Mode: \(current.name)")
         .confirmationDialog("Start a \(pending?.name ?? "") session?", isPresented: .init(
@@ -118,10 +119,11 @@ struct ModelMenu: View {
             }
             .font(.footnote.weight(.medium))
             .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.fill.tertiary, in: .capsule)
         }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
         .menuOrder(.fixed)
         .onAppear { if store.catalog.groups.isEmpty { Task { await store.loadCatalog() } } }
         .accessibilityLabel("Model: \(store.catalog.displayName(current)), thinking \(store.catalog.effortName(current) ?? "default")")

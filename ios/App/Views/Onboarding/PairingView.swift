@@ -80,7 +80,7 @@ struct PairingView: View {
                         Label("Scan Pairing QR Code", systemImage: "qrcode.viewfinder")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .controlSize(.large)
 
                     PasteButton(payloadType: String.self) { strings in

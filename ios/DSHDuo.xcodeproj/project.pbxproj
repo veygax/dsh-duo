@@ -13,6 +13,7 @@
 		0E03724D3EF9DC847B02DF86 /* DSHDuoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E363B98AD549BF178BD929 /* DSHDuoApp.swift */; };
 		10364C113586B4646FE0800F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 611277FC78C164DF9FE429E7 /* Assets.xcassets */; };
 		1EE7CE58C9F24C6E4C6EED13 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCEA930A7B1ED75196A172AD /* ConversationView.swift */; };
+		254C09D10AFC9EC601CBB810 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = F6ACA182D9C68A5317907153 /* AppIcon.icon */; };
 		3228B3853B228943B75D3F80 /* DuoCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED92AE61B24458488741F75D /* DuoCrypto.swift */; };
 		3575F6244D6979C2A6273B7B /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF0D799EBE264A9ABE84608 /* InspectorView.swift */; };
 		3914D7496D121C18D6027BC2 /* DSHDuoNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D6CC76C18373C0747D4EFE25 /* DSHDuoNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -113,6 +114,7 @@
 		ED92AE61B24458488741F75D /* DuoCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoCrypto.swift; sourceTree = "<group>"; };
 		F3695CDB13A5BD8C6BA16208 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F4B6FE651B773D4D13315B49 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		F6ACA182D9C68A5317907153 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		FEBD7BF708D121970A5BA6A2 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -150,6 +152,7 @@
 		393D5FAEC90269C5907F201E /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F6ACA182D9C68A5317907153 /* AppIcon.icon */,
 				611277FC78C164DF9FE429E7 /* Assets.xcassets */,
 				394C23E736008599B6A30DAE /* DSHDuo.entitlements */,
 				E9E363B98AD549BF178BD929 /* DSHDuoApp.swift */,
@@ -372,6 +375,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				254C09D10AFC9EC601CBB810 /* AppIcon.icon in Resources */,
 				10364C113586B4646FE0800F /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

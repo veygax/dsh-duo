@@ -22,7 +22,12 @@ targets:
     type: application
     platform: iOS
     sources:
-      - App
+      - path: App
+        excludes:
+          - AppIcon.icon
+      - path: App/AppIcon.icon
+        type: file
+        buildPhase: resources
       - Shared
     entitlements:
       path: App/DSHDuo.entitlements

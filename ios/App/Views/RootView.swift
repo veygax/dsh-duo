@@ -53,7 +53,7 @@ struct NoSessionView: View {
             Text("Pick a session from the list, or start a new one on \(store.hostName).")
         } actions: {
             Button("New Session", systemImage: "square.and.pencil", action: tap { creating = true })
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(store.connection != .online)
         }
         .sheet(isPresented: $creating) { NewSessionSheet() }
@@ -103,7 +103,7 @@ private struct BannerCard: View {
             }
             .padding(14)
             .frame(maxWidth: 520)
-            .glassEffect(.regular, in: .rect(cornerRadius: 22))
+            .glassEffect(.regular.interactive(), in: .rect(corners: .concentric(minimum: 22), isUniform: true))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Dismisses the message")

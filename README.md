@@ -58,6 +58,28 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - Grids use an even number of columns (mode cards, question options) so they divide cleanly at the fold.
 - Size-class driven layout with no fixed widths; deployment target iOS 27.1.
 
+### Liquid Glass
+
+Follows Apple's [Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/liquid-glass) guidance:
+
+- **Standard components carry the glass.** Bars, sheets, menus, toolbars and the split view use the system
+  appearance with no custom backgrounds. Sheet actions use `Button(role: .cancel / .confirm / .close)`, and buttons
+  use system styles: `.glass` for the full-screen exit button, `.glassProminent` for primary calls to action on
+  content, and `.bordered` / `.borderedProminent` inside glass surfaces.
+- **Custom glass only on key functional elements:** the composer, the command list, question cards and the
+  transient banner. They share one `GlassEffectContainer`, so they blend and morph (`glassEffectID`) instead of
+  stacking glass on glass.
+- **Scroll edge effect.** The composer stack is a `safeAreaBar`, so content scrolling beneath it gets the system
+  scroll edge effect.
+- **Concentric shapes.** Custom glass uses `.rect(corners: .concentric(minimum:), isUniform: true)` to stay concentric
+  with the display and its containers.
+- **Toolbars:** icon items with accessibility labels, Stop and Full Screen as separate items with a
+  `ToolbarSpacer(.fixed)`, conditional items rather than hidden views, and the system overflow menu.
+- **Restrained color.** The accent color has light, dark and increased-contrast variants. Action sheets are anchored
+  to the control that opens them, and section headers use title-style capitalization.
+- **Layered app icon.** `App/AppIcon.icon` is an Icon Composer document: flat SVG layers over a system gradient, so
+  the system supplies the glass, lighting and the dark, clear and tinted variants.
+
 ## Quick start
 
 1. **Relay.** Deploy once, anywhere public. See [relay/README.md](relay/README.md). The Cloudflare Workers free tier works:

@@ -69,10 +69,11 @@ struct AddWorkspaceSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark", action: tap { dismiss() })
+                    Button(role: .cancel, action: tap { dismiss() })
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", systemImage: "checkmark", action: add)
+                    Button(role: .confirm, action: add)
+                        .accessibilityLabel("Add Workspace")
                         .disabled(listing == nil || adding)
                 }
                 ToolbarItem(placement: .bottomBar) {

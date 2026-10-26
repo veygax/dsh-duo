@@ -43,10 +43,9 @@ struct SessionView: View {
                         Spacer()
                         Button("Exit Full Screen", systemImage: "arrow.down.right.and.arrow.up.left", action: { store.toggleFocus() })
                             .labelStyle(.iconOnly)
-                            .font(.title3.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                            .buttonStyle(.plain)
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.circle)
+                            .controlSize(.large)
                             .keyboardShortcut(.escape, modifiers: [])
                     }
                     .padding(.horizontal, 12)
@@ -71,14 +70,21 @@ struct SessionView: View {
 
     @ToolbarContentBuilder
     private func toolbar(_ session: SessionInfo?) -> some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if session?.running == true {
+        // Stop affects the turn, Full Screen affects the view: separate items, not one shared group.
+        // Present the whole item only while a turn runs, rather than hiding the view inside it.
+        if session?.running == true {
+            ToolbarItem(placement: .primaryAction) {
                 Button("Stop", systemImage: "stop.fill", action: tap {
                     Task { await store.cancel(sessionId) }
                 })
-                .tint(.red)
                 .keyboardShortcut(".", modifiers: .command)
             }
+            .visibilityPriority(.high)
+
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
             Button(store.isFocused ? "Exit Full Screen" : "Full Screen",
                    systemImage: store.isFocused ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                    action: { store.toggleFocus() })

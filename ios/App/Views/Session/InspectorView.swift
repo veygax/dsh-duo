@@ -32,7 +32,7 @@ struct InspectorView: View {
                 }
             }
 
-            Section("This Turn · \(tools.count) tool call\(tools.count == 1 ? "" : "s")") {
+            Section("This Turn · \(tools.count) Tool Call\(tools.count == 1 ? "" : "s")") {
                 if tools.isEmpty {
                     Text("No tool calls yet").foregroundStyle(.secondary)
                 }

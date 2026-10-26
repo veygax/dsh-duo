@@ -52,7 +52,7 @@ struct QuestionCard: View {
             }
         }
         .padding(16)
-        .glassEffect(.regular.tint(.orange.opacity(0.12)), in: .rect(cornerRadius: 24))
+        .glassEffect(.regular.tint(.orange.opacity(0.12)), in: .rect(corners: .concentric(minimum: 24), isUniform: true))
         .frame(maxWidth: 780)
         .onAppear {
             Haptics.attention()
@@ -70,32 +70,11 @@ struct QuestionCard: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(question.options, id: \.label) { option in
                     let selected = selections[question.id, default: []].contains(option.label)
-                    Button {
+                    OptionButton(option: option, multi: question.multiSelect, selected: selected) {
+                        Haptics.selection()
                         toggle(option.label, in: question)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                if question.multiSelect {
-                                    Image(systemName: selected ? "checkmark.square.fill" : "square")
-                                }
-                                Text(option.label).font(.subheadline.weight(.semibold))
-                            }
-                            if let description = option.description {
-                                Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(selected ? AnyShapeStyle(Color.accentColor.opacity(0.2)) : AnyShapeStyle(.fill.tertiary),
-                                    in: .rect(cornerRadius: 14))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 1.5)
-                        }
                     }
-                    .buttonStyle(HapticPressStyle())
                     .disabled(submitting)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
         }
@@ -134,5 +113,37 @@ struct QuestionCard: View {
         Task {
             if await !store.answer(pending, answers) { submitting = false }
         }
+    }
+}
+
+/// One answer choice: a standard bordered button that turns prominent when selected.
+private struct OptionButton: View {
+    let option: QuestionOption
+    let multi: Bool
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        let label = VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                if multi { Image(systemName: selected ? "checkmark.square.fill" : "square") }
+                Text(option.label).font(.subheadline.weight(.semibold))
+            }
+            if let description = option.description {
+                Text(description).font(.caption).opacity(0.8).lineLimit(3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+
+        Group {
+            if selected {
+                Button(action: action) { label }.buttonStyle(.borderedProminent)
+            } else {
+                Button(action: action) { label }.buttonStyle(.bordered).tint(.secondary).foregroundStyle(.primary)
+            }
+        }
+        .buttonBorderShape(.roundedRectangle)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

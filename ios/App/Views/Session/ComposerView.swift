@@ -7,6 +7,7 @@ struct ComposerView: View {
     let sessionId: String
     @FocusState private var focused: Bool
     @State private var showCommands = false
+    @Namespace private var glass
 
     private var session: SessionInfo? { store.sessions[sessionId] }
     private var running: Bool { session?.running == true }
@@ -40,7 +41,7 @@ struct ComposerView: View {
                         showCommands = false
                         focused = true
                     }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .glassEffectID("commands", in: glass)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     TextField(running ? "Add to the queue or steer…" : "Message DeepSeek", text: $model.draft, axis: .vertical)
@@ -69,13 +70,16 @@ struct ComposerView: View {
                         .labelStyle(.iconOnly)
                         .font(.title3)
                         .buttonStyle(.borderless)
+                        .accessibilityLabel("Commands and skills")
                         Spacer(minLength: 0)
                         sendButton
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 26))
+                // Concentric with the display corners it sits beside.
+                .glassEffect(.regular, in: .rect(corners: .concentric(minimum: 24), isUniform: true))
+                .glassEffectID("composer", in: glass)
             }
             .frame(maxWidth: 780)
             .animation(.snappy, value: matches.map(\.id))
@@ -88,20 +92,21 @@ struct ComposerView: View {
     @ViewBuilder
     private var sendButton: some View {
         if running && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Button("Stop", systemImage: "stop.circle.fill") {
+            Button("Stop", systemImage: "stop.fill") {
                 Haptics.press()
                 Task { await store.cancel(sessionId) }
             }
             .labelStyle(.iconOnly)
-            .font(.system(size: 30))
-            .foregroundStyle(.red)
-            .buttonStyle(.borderless)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .tint(.red)
             .accessibilityHint("Stops the current turn")
         } else {
-            Button("Send", systemImage: "arrow.up.circle.fill") { send(steer: false) }
+            Button("Send", systemImage: "arrow.up") { send(steer: false) }
                 .labelStyle(.iconOnly)
-                .font(.system(size: 30))
-                .buttonStyle(.borderless)
+                .fontWeight(.semibold)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
                 .disabled(!canSend)
                 .overlay { if model.sending { ProgressView().controlSize(.small) } }
                 .contextMenu {
@@ -167,7 +172,7 @@ struct SlashCommandList: View {
         }
         .frame(maxHeight: 260)
         .fixedSize(horizontal: false, vertical: commands.count < 5)
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .glassEffect(.regular, in: .rect(corners: .concentric(minimum: 20), isUniform: true))
         .accessibilityLabel("Commands and skills")
     }
 }

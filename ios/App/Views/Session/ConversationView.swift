@@ -8,13 +8,17 @@ struct ConversationView: View {
 
     var body: some View {
         TranscriptView(model: model, session: store.sessions[sessionId])
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 10) {
-                    ForEach(store.questions(for: sessionId)) { question in
-                        QuestionCard(pending: question)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+            // A bar, not a plain inset: content scrolling beneath it gets the system scroll edge effect.
+            .safeAreaBar(edge: .bottom, spacing: 0) {
+                // One container renders the question cards, command list and composer together
+                // so their glass blends and morphs instead of stacking.
+                GlassEffectContainer(spacing: 10) {
+                    VStack(spacing: 10) {
+                        ForEach(store.questions(for: sessionId)) { question in
+                            QuestionCard(pending: question)
+                        }
+                        ComposerView(model: model, sessionId: sessionId)
                     }
-                    ComposerView(model: model, sessionId: sessionId)
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
@@ -104,12 +108,13 @@ private struct EmptySessionHint: View {
                 ForEach(suggestions, id: \.self) { suggestion in
                     Button(action: tap { model.draft = suggestion }) {
                         Text(suggestion)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.fill.tertiary, in: .rect(cornerRadius: 14))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle)
+                    .controlSize(.large)
+                    .tint(.secondary)
+                    .foregroundStyle(.primary)
                 }
             }
             Text("Type / to see commands and skills.")

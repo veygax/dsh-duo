@@ -21,7 +21,7 @@ struct SidebarView: View {
                     Text("Add a project folder from \(store.hostName), then start a session in it.")
                 } actions: {
                     Button("Add Workspace", systemImage: "folder.badge.plus", action: tap { addingWorkspace = true })
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                 }
                 .listRowBackground(Color.clear)
             }
@@ -214,9 +214,9 @@ struct RenameSheet: View {
             .navigationTitle("Rename Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: tap { dismiss() }) }
+                ToolbarItem(placement: .cancellationAction) { Button(role: .cancel, action: tap { dismiss() }) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button(role: .confirm, action: save).disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }

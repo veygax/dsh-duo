@@ -70,10 +70,11 @@ struct NewSessionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark", action: tap { dismiss() })
+                    Button(role: .cancel, action: tap { dismiss() })
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Start", systemImage: "arrow.up", action: create)
+                    Button(role: .confirm, action: create)
+                        .accessibilityLabel("Start Session")
                         .disabled(creating || (workspaceId == nil && !store.workspaces.isEmpty))
                         .keyboardShortcut(.defaultAction)
                 }
@@ -125,8 +126,8 @@ private struct ModeCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .foregroundStyle(selected ? .white : .primary)
-            .background(selected ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(.background.secondary),
-                        in: .rect(cornerRadius: 18))
+            .background(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.background.secondary),
+                        in: .rect(corners: .concentric(minimum: 16), isUniform: true))
         }
         .buttonStyle(HapticPressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])

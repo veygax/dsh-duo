@@ -47,23 +47,24 @@ struct SettingsView: View {
 
                 Section {
                     Button("Unpair This iPhone", systemImage: "link.badge.minus", role: .destructive, action: tap { confirmUnpair = true })
+                        // Anchored to the button so the action sheet originates from it.
+                        .confirmationDialog("Unpair from \(store.hostName)?", isPresented: $confirmUnpair, titleVisibility: .visible) {
+                            Button("Unpair", role: .destructive) {
+                                Haptics.warning()
+                                dismiss()
+                                store.unpair()
+                            }
+                        } message: {
+                            Text("You'll need to scan the pairing QR code again to reconnect.")
+                        }
                 }
             }
             .navigationTitle("Connection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", systemImage: "checkmark", action: tap { dismiss() })
+                    Button(role: .close, action: tap { dismiss() })
                 }
-            }
-            .confirmationDialog("Unpair from \(store.hostName)?", isPresented: $confirmUnpair, titleVisibility: .visible) {
-                Button("Unpair", role: .destructive) {
-                    Haptics.warning()
-                    dismiss()
-                    store.unpair()
-                }
-            } message: {
-                Text("You'll need to scan the pairing QR code again to reconnect.")
             }
             .task {
                 notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
