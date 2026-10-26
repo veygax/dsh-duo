@@ -88,6 +88,7 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `workspaces.list` | — | `Workspace[]` |
 | `workspaces.add` | `path` | `Workspace` |
 | `fs.list` | `path?` | `{ path, home, parent?, entries: [{ name, path, hidden }] }` |
+| `fs.read` | `path`, `sessionId?` | `{ path, name, size, data }`: one file of at most 2 MB, `data` in base64; a relative `path` is read against the Session's folder. Fails with `duo/not-found`, `duo/is-directory` or `duo/too-large` |
 | `session.create` | `workspaceId?`, `cwd?`, `preset?` | `Session` |
 | `session.open` | `sessionId` | `{ session, items: Item[], hasMore }` then `session.items`/`session.live` events |
 | `session.older` | `sessionId` (open) | `{ items: Item[], hasMore }`: the page before the oldest item held, read with dsh's `session/page`; the phone reads every page in the background right after `session.open` |

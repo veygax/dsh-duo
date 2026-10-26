@@ -5,8 +5,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { hostname } from 'node:os'
-import { dirname, join } from 'node:path'
+import { open as openFile } from 'node:fs/promises'
+import { homedir, hostname } from 'node:os'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
 import { Directory, type QuestionView, type SessionView } from './directory.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent, HostContext } from './host.ts'
@@ -18,6 +19,9 @@ import { Remote, RemoteFailure, failureOf } from './remote.ts'
 import { LiveReducer, Transcript, type Item, type WireEvent } from './transcript.ts'
 
 export const VERSION = '0.1.0'
+
+/** Largest file `fs.read` hands over: sealed and encoded twice, it must still fit one 4 MB relay frame. */
+const MAX_READ_BYTES = 2 * 1024 * 1024
 
 export interface BridgeConfig {
   readonly relay: string
@@ -487,6 +491,8 @@ export class Bridge {
           entries: entries.map(entry => ({ name: entry.name, path: entry.path, hidden: entry.hidden === true })),
         }
       }
+      case 'fs.read':
+        return await this.readFile(str(m.path, 'path'), typeof m.sessionId === 'string' ? m.sessionId : undefined)
       case 'session.create': {
         const request: Json = {}
         if (typeof m.workspaceId === 'string') request.workspaceId = m.workspaceId
@@ -558,6 +564,32 @@ export class Bridge {
         return { relay: this.pairing.relay, devices: [...this.link?.devices ?? []] }
       default:
         throw new RemoteFailure('duo/unknown-op', `unknown operation ${op}`)
+    }
+  }
+
+  /**
+   * One file DeepSeek linked to, for the phone to preview. A relative path is read against the
+   * Session's folder, the way the agent wrote it. The paired phone is the Host's owner, as it is
+   * for `fs.list`, so any file this user can read is fair game.
+   */
+  private async readFile(path: string, sessionId: string | undefined) {
+    const home = path === '~' || path.startsWith('~/') ? join(homedir(), path.slice(1)) : path
+    const cwd = sessionId === undefined ? undefined : this.directory.view(sessionId)?.cwd
+    const full = isAbsolute(home) ? home : resolve(cwd ?? homedir(), home)
+    const handle = await openFile(full, 'r').catch((error: NodeJS.ErrnoException) => {
+      throw new RemoteFailure(error.code === 'ENOENT' ? 'duo/not-found' : 'duo/unreadable',
+        error.code === 'ENOENT' ? `${full} does not exist` : `${full} can't be read (${error.code ?? error.message})`)
+    })
+    try {
+      const stat = await handle.stat()
+      if (stat.isDirectory()) throw new RemoteFailure('duo/is-directory', `${full} is a folder`)
+      if (stat.size > MAX_READ_BYTES) {
+        throw new RemoteFailure('duo/too-large', `${basename(full)} is ${(stat.size / 1048576).toFixed(1)} MB, over the 2 MB preview limit`)
+      }
+      const data = await handle.readFile()
+      return { path: full, name: basename(full), size: data.length, data: data.toString('base64') }
+    } finally {
+      await handle.close()
     }
   }
 

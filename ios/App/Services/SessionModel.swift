@@ -21,6 +21,9 @@ final class SessionModel: Identifiable {
     /// Messages sent during a turn. dsh only records them when it takes them in: at its next step
     /// when steering, after the turn when queued. Until then they show here so a send never looks lost.
     private(set) var pending: [PendingMessage] = []
+    /// A row picked from search, for the transcript to scroll to and mark.
+    var reveal: Reveal?
+    let search = TranscriptSearch()
 
     init(id: String) {
         self.id = id
@@ -109,6 +112,12 @@ final class SessionModel: Identifiable {
         guard let last = items.last(where: { $0.kind != .notice }) else { return false }
         return last.kind == .user
     }
+}
+
+struct Reveal: Equatable {
+    let itemId: String
+    /// Picking the same row twice scrolls to it again.
+    let token = UUID()
 }
 
 struct PendingMessage: Identifiable {

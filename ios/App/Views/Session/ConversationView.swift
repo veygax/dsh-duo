@@ -47,6 +47,8 @@ struct TranscriptView: View {
     /// keep it there; once the user scrolls up, nothing moves them.
     @State private var following = true
     @State private var placeKeeper = PlaceKeeper()
+    /// The row just picked from search, marked for a moment so the eye finds it.
+    @State private var marked: String?
 
     private static let end = "transcript-end"
 
@@ -79,6 +81,11 @@ struct TranscriptView: View {
 
                 ForEach(model.items) { item in
                     ItemView(item: item)
+                        .background {
+                            if marked == item.id {
+                                RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.16)).padding(-6)
+                            }
+                        }
                         .id(item.id)
                 }
 
@@ -133,6 +140,14 @@ struct TranscriptView: View {
         .onChange(of: model.live?.text.count ?? 0) { stickToEnd(proxy) }
         .onChange(of: model.live?.thinking.count ?? 0) { stickToEnd(proxy) }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { _, _ in stickToEnd(proxy) }
+        .task(id: model.reveal?.token) {
+            guard let reveal = model.reveal else { return }
+            following = false
+            proxy.scrollTo(reveal.itemId, anchor: .center)
+            withAnimation(.smooth) { marked = reveal.itemId }
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(.smooth(duration: 0.8)) { marked = nil }
+        }
         }
     }
 

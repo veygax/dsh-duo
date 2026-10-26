@@ -77,6 +77,7 @@ struct ComposerView: View {
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Commands and skills")
                         Spacer(minLength: 0)
+                        ThinkingControl(sessionId: sessionId)
                         sendButton
                     }
                 }

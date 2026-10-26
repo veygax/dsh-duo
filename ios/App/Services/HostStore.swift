@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import QuickLook
 import SwiftUI
 import UIKit
 
@@ -451,6 +452,35 @@ final class HostStore {
             if !workspaces.contains(where: { $0.id == workspace.id }) { workspaces.append(workspace) }
             Haptics.success()
             return workspace
+        } catch {
+            show(error)
+            return nil
+        }
+    }
+
+    // MARK: Files
+
+    /// Fetch a file DeepSeek linked to into a private temporary folder for QuickLook. A relative
+    /// path is the Host's to resolve, against the Session's folder.
+    func download(_ path: String, in sessionId: String) async -> URL? {
+        guard let client else { return nil }
+        do {
+            let value = try await client.request("fs.read", ["path": path, "sessionId": sessionId], timeout: .seconds(60))
+            guard let name = value["name"]?.string, let encoded = value["data"]?.string,
+                  let data = Data(base64Encoded: encoded) else {
+                throw RemoteError(code: "duo/bad-response", message: "The Mac sent an unreadable file")
+            }
+            let folder = URL.temporaryDirectory.appending(path: "Previews/\(UUID().uuidString)", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            var url = folder.appending(path: name)
+            try data.write(to: url)
+            // QuickLook shows text by its type: source files and extensionless ones read as plain text.
+            if !QLPreviewController.canPreview(url as NSURL), String(data: data, encoding: .utf8) != nil {
+                let text = folder.appending(path: name + ".txt")
+                try FileManager.default.moveItem(at: url, to: text)
+                url = text
+            }
+            return url
         } catch {
             show(error)
             return nil

@@ -57,7 +57,7 @@ struct ModeMenu: View {
     }
 }
 
-/// Model and thinking level for the Session's next turn.
+/// Model for the Session's next turn; its thinking level is set beside Send.
 struct ModelMenu: View {
     @Environment(HostStore.self) private var store
     let sessionId: String
@@ -65,7 +65,6 @@ struct ModelMenu: View {
     var body: some View {
         let session = store.sessions[sessionId]
         let current = session?.model ?? store.catalog.defaultModel
-        let model = store.catalog.model(current)
         Menu {
             ForEach(store.catalog.groups) { group in
                 Section(group.name) {
@@ -85,24 +84,6 @@ struct ModelMenu: View {
                     }
                 }
             }
-            if let model, !model.efforts.isEmpty, let current {
-                Section("Thinking") {
-                    Picker("Thinking", selection: Binding(
-                        get: { current.effort ?? model.defaultEffort ?? "" },
-                        set: { effort in
-                            Haptics.selection()
-                            var next = current
-                            next.effort = effort
-                            Task { await store.selectModel(next, for: sessionId) }
-                        }
-                    )) {
-                        ForEach(model.efforts) { effort in
-                            Label(effort.name, systemImage: Self.symbol(for: effort.id)).tag(effort.id)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                }
-            }
             if store.catalog.groups.isEmpty {
                 Button("Load Models", systemImage: "arrow.clockwise") {
                     Haptics.tap()
@@ -113,9 +94,6 @@ struct ModelMenu: View {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
                 Text(store.catalog.shortName(current))
-                if let effort = store.catalog.effortName(current) {
-                    Text("· \(effort)").foregroundStyle(.secondary)
-                }
             }
             .font(.footnote.weight(.medium))
             .lineLimit(1)
@@ -126,7 +104,138 @@ struct ModelMenu: View {
         .controlSize(.small)
         .menuOrder(.fixed)
         .onAppear { if store.catalog.groups.isEmpty { Task { await store.loadCatalog() } } }
-        .accessibilityLabel("Model: \(store.catalog.displayName(current)), thinking \(store.catalog.effortName(current) ?? "default")")
+        .accessibilityLabel("Model: \(store.catalog.displayName(current))")
+    }
+}
+
+/// How hard the model thinks on the Session's next turn, beside Send. Open, a slider whose stops are
+/// the model's levels; folded there is no room for one, so the same levels are a menu behind a gauge.
+struct ThinkingControl: View {
+    @Environment(HostStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    let sessionId: String
+    /// The stop under the thumb while dragging, and after release until dsh confirms the choice.
+    @State private var dragged: Double?
+    @State private var editing = false
+
+    var body: some View {
+        let current = store.sessions[sessionId]?.model ?? store.catalog.defaultModel
+        if let current, let model = store.catalog.model(current), model.efforts.count > 1 {
+            let efforts = model.efforts
+            let selected = efforts.firstIndex { $0.id == (current.effort ?? model.defaultEffort) } ?? 0
+            let shown = min(efforts.count - 1, max(0, dragged.map { Int($0.rounded()) } ?? selected))
+            Group {
+                if sizeClass == .compact {
+                    menu(efforts, shown: shown, current: current)
+                } else {
+                    slider(efforts, shown: shown, selected: selected, current: current)
+                }
+            }
+            .accessibilityLabel("Thinking")
+            .accessibilityValue(efforts[shown].name)
+        }
+    }
+
+    private func menu(_ efforts: [ReasoningEffort], shown: Int, current: ModelRef) -> some View {
+        Menu {
+            Picker("Thinking", selection: Binding(
+                get: { efforts[shown].id },
+                set: { id in if let index = efforts.firstIndex(where: { $0.id == id }) { choose(index, of: efforts, current: current) } }
+            )) {
+                ForEach(efforts) { effort in
+                    Label(effort.name, systemImage: Self.symbol(for: effort.id)).tag(effort.id)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Thinking: \(efforts[shown].name)", systemImage: Self.symbol(for: efforts[shown].id))
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .labelStyle(.iconOnly)
+        .font(.title3)
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .menuOrder(.fixed)
+        .menuIndicator(.hidden)
+    }
+
+    private func slider(_ efforts: [ReasoningEffort], shown: Int, selected: Int, current: ModelRef) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: Self.symbol(for: efforts[shown].id))
+                .contentTransition(.symbolEffect(.replace))
+                .foregroundStyle(.secondary)
+                // While held, the level's name sits over the gauge, in line with the dots: away from the
+                // finger and the thumb's glass, which grows while it is held.
+                .overlay {
+                    if editing {
+                        Text(efforts[shown].name)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                            .id(shown)
+                            .transition(.blurReplace)
+                            .offset(y: -Self.stopRise)
+                    }
+                }
+                .animation(.snappy(duration: 0.2), value: editing ? shown : -1)
+                .accessibilityHidden(true)
+            Slider(
+                value: Binding(
+                    get: { dragged ?? Double(selected) },
+                    set: { value in
+                        if Int(value.rounded()) != shown { Haptics.selection() }
+                        dragged = value
+                    }),
+                // Continuous, so the thumb follows the finger and the system draws no ticks of its own
+                // under ours; it settles on the nearest level when let go.
+                in: 0...Double(efforts.count - 1)
+            ) {
+                Text("Thinking")
+            } onEditingChanged: { editing in
+                self.editing = editing
+                if !editing {
+                    withAnimation(.snappy) { dragged = Double(shown) }
+                    choose(shown, of: efforts, current: current)
+                }
+            }
+            .overlay { stops(efforts) }
+        }
+        .frame(minWidth: 96, maxWidth: 150)
+    }
+
+    /// A dot above the track for each level, where a finger on the thumb doesn't cover it.
+    private func stops(_ efforts: [ReasoningEffort]) -> some View {
+        GeometryReader { geometry in
+            let inset = Self.stopInset
+            let span = geometry.size.width - inset * 2
+            ForEach(efforts.indices, id: \.self) { index in
+                Circle()
+                    .fill(.tertiary)
+                    .frame(width: 4, height: 4)
+                    .position(x: inset + span * CGFloat(index) / CGFloat(max(1, efforts.count - 1)),
+                              y: geometry.size.height / 2 - Self.stopRise)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// Where the system slider's first and last stops sit inside its frame (matched to the tick marks it
+    /// draws for a stepped slider), and how far above the track's centre the dots and name go.
+    private static let stopInset: CGFloat = 18
+    private static let stopRise: CGFloat = 19
+
+    private func choose(_ index: Int, of efforts: [ReasoningEffort], current: ModelRef) {
+        let effort = efforts[index].id
+        guard effort != current.effort else { dragged = nil; return }
+        if sizeClass == .compact { Haptics.selection() }
+        dragged = Double(index)
+        var next = current
+        next.effort = effort
+        Task {
+            await store.selectModel(next, for: sessionId)
+            dragged = nil
+        }
     }
 
     static func symbol(for effort: String) -> String {

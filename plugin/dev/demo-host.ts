@@ -132,6 +132,14 @@ session('s-notes', 'Summarize the RFC', '/Users/dev/Documents', 1440, 'minimal',
   ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
 ])
 
+// Links to real files in this repository, which `fs.read` serves for the phone's QuickLook preview.
+session('s-files', 'Review the protocol docs', new URL('../..', import.meta.url).pathname.replace(/\/$/, ''), 2, 'standard', [
+  ev('turn/start', { turn: 1 }),
+  user('Where is the phone protocol documented?'),
+  assistant(1, [{ type: 'text', text: 'It lives in [PROTOCOL.md](docs/PROTOCOL.md:88), next to the [README](README.md). The bridge that answers it is [bridge.ts](plugin/src/bridge.ts), and the app icon is [icon.json](ios/App/AppIcon.icon/icon.json).' }]),
+  ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+])
+
 // Longer than one follow window, so the phone has to page back to its first message.
 for (const [id, title] of [['s-long', 'Long refactor'], ['s-long-2', 'Long migration']] as const) {
   session(id, title, '/Users/dev/Code/webapp', 2880, 'standard', Array.from({ length: 120 }, (_, i) => [
