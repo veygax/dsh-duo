@@ -1,0 +1,9 @@
+node_modules/
+plugin/lib/
+relay/data/
+.wrangler/
+*.tmp
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate

@@ -1,0 +1,429 @@
+import Foundation
+import Observation
+import SwiftUI
+import UIKit
+
+/// App-wide state for the paired dsh Host: connection, Sessions, Workspaces,
+/// modes, models, questions, and every operation the UI performs.
+@MainActor
+@Observable
+final class HostStore {
+    enum Connection: Equatable {
+        case unpaired
+        case connecting
+        case hostOffline
+        case online
+        case failed(String)
+    }
+
+    private(set) var pairing: Pairing?
+    private(set) var connection: Connection = .unpaired
+    private(set) var hostVersion: String?
+    private(set) var sessions: [String: SessionInfo] = [:]
+    private(set) var workspaces: [Workspace] = []
+    private(set) var presets: [Preset] = []
+    private(set) var catalog = ModelCatalog(groups: [], defaultModel: nil)
+    private(set) var questions: [String: PendingQuestion] = [:]
+    private(set) var loadedOnce = false
+    private var models: [String: SessionModel] = [:]
+
+    /// Split view selection; also drives which Session counts as "visible" for notifications.
+    var selectedSessionId: String?
+    var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// Transient message shown at the top of the window.
+    var banner: Banner?
+    var isActive = true
+
+    private var client: RelayClient?
+    private var pushToken: String?
+
+    struct Banner: Identifiable, Equatable {
+        var id = UUID()
+        var title: String
+        var message: String?
+        var sessionId: String?
+        var isError = false
+    }
+
+    init() {
+        if let stored = PairingStore.load() { attach(stored) }
+    }
+
+    var hostName: String { pairing?.hostName ?? "dsh" }
+    var isFocused: Bool { columnVisibility == .detailOnly }
+
+    // MARK: Pairing and connection
+
+    @discardableResult
+    func pair(link: String) -> Bool {
+        guard let pairing = Pairing.parse(link, deviceId: PairingStore.deviceId) else { return false }
+        PairingStore.save(pairing)
+        attach(pairing)
+        Haptics.success()
+        return true
+    }
+
+    func unpair() {
+        client?.disconnect()
+        client = nil
+        PairingStore.clear()
+        pairing = nil
+        sessions = [:]
+        workspaces = []
+        questions = [:]
+        models = [:]
+        selectedSessionId = nil
+        loadedOnce = false
+        connection = .unpaired
+    }
+
+    private func attach(_ pairing: Pairing) {
+        client?.disconnect()
+        self.pairing = pairing
+        guard let client = RelayClient(pairing: pairing) else {
+            connection = .failed("The pairing link is invalid")
+            return
+        }
+        self.client = client
+        client.onState = { [weak self] state in self?.connectionChanged(state) }
+        client.onEvent = { [weak self] event in self?.handle(event: event) }
+        connection = .connecting
+        if isActive { client.connect() }
+    }
+
+    /// Called from scene phase changes. Backgrounded apps hang up so the relay sends pushes instead.
+    func setActive(_ active: Bool) {
+        isActive = active
+        if active { client?.connect() } else { client?.disconnect() }
+    }
+
+    func reconnect() {
+        client?.disconnect()
+        client?.connect()
+    }
+
+    private func connectionChanged(_ state: RelayClient.State) {
+        switch state {
+        case .idle: if pairing != nil { connection = .connecting }
+        case .connecting: connection = .connecting
+        case .online(host: false): connection = .hostOffline
+        case .online(host: true):
+            connection = .online
+            if let pushToken { client?.registerPush(token: pushToken, production: Self.productionPush) }
+            Task { await hello() }
+        case .failed(let message): connection = .failed(message)
+        }
+    }
+
+    func setPushToken(_ token: String) {
+        pushToken = token
+        client?.registerPush(token: token, production: Self.productionPush)
+    }
+
+    private static var productionPush: Bool {
+        #if DEBUG
+        false
+        #else
+        true
+        #endif
+    }
+
+    private func hello() async {
+        guard let client else { return }
+        do {
+            let value = try await client.request("hello", [
+                "device": ["name": UIDevice.current.name, "model": UIDevice.current.model],
+            ])
+            hostVersion = value["version"]?.string
+            presets = (try? value["presets"]?.decode([Preset].self)) ?? []
+            workspaces = (try? value["workspaces"]?.decode([Workspace].self)) ?? []
+            let list = (try? value["sessions"]?.decode([SessionInfo].self)) ?? []
+            sessions = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
+            loadedOnce = true
+            // Re-open any Session already on screen so its stream resumes after a reconnect.
+            for model in models.values { Task { await open(model) } }
+            Task { await loadCatalog() }
+        } catch {
+            show(error)
+        }
+    }
+
+    func refresh() async {
+        guard let client else { return }
+        if let list = try? await client.decode("sessions.list", as: [SessionInfo].self) {
+            sessions = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
+        }
+        if let list = try? await client.decode("workspaces.list", as: [Workspace].self) { workspaces = list }
+    }
+
+    func loadCatalog() async {
+        guard let client, let value = try? await client.request("models.catalog") else { return }
+        let groups = (try? value["groups"]?.decode([ProviderGroup].self)) ?? []
+        var fallback: ModelRef?
+        if let provider = value["default"]?["provider"]?.string, let model = value["default"]?["model"]?.string {
+            fallback = ModelRef(provider: provider, model: model, effort: value["default"]?["reasoningEffort"]?.string)
+        }
+        catalog = ModelCatalog(groups: groups, defaultModel: fallback)
+    }
+
+    // MARK: Events
+
+    private func handle(event: JSONValue) {
+        switch event["ev"]?.string {
+        case "sessions.upsert":
+            if let session = try? event["session"]?.decode(SessionInfo.self) { sessions[session.id] = session }
+        case "sessions.remove":
+            if let id = event["sessionId"]?.string { sessions[id] = nil }
+        case "workspaces.changed":
+            if let list = try? event["workspaces"]?.decode([Workspace].self) { workspaces = list }
+        case "session.items":
+            guard let id = event["sessionId"]?.string, let model = models[id],
+                  let items = try? event["items"]?.decode([TranscriptItem].self) else { return }
+            model.merge(items, replace: event["replace"]?.bool == true)
+        case "session.live":
+            guard let id = event["sessionId"]?.string, let model = models[id] else { return }
+            model.applyLive(event)
+        case "question":
+            guard let sessionId = event["sessionId"]?.string, let callId = event["callId"]?.string,
+                  let items = try? event["questions"]?.decode([Question].self) else { return }
+            let isNew = questions[callId] == nil
+            questions[callId] = PendingQuestion(callId: callId, sessionId: sessionId,
+                                                title: event["title"]?.string ?? "Session", questions: items)
+            if isNew && !isVisible(sessionId) {
+                Haptics.attention()
+                Notifier.shared.local(title: event["title"]?.string ?? "dsh",
+                                      body: items.first?.question ?? "DeepSeek has a question",
+                                      sessionId: sessionId, kind: "question", callId: callId, questionId: items.first?.id)
+            }
+        case "question.resolved":
+            if let callId = event["callId"]?.string { questions[callId] = nil }
+        case "turn.finished":
+            guard let sessionId = event["sessionId"]?.string else { return }
+            let title = event["title"]?.string ?? "Session"
+            let summary = event["summary"]?.string ?? "Finished"
+            if isVisible(sessionId) {
+                Haptics.success()
+            } else {
+                Notifier.shared.local(title: title, body: summary, sessionId: sessionId, kind: "turn")
+            }
+        default:
+            break
+        }
+    }
+
+    private func isVisible(_ sessionId: String) -> Bool {
+        isActive && selectedSessionId == sessionId
+    }
+
+    // MARK: Derived lists
+
+    var sortedSessions: [SessionInfo] {
+        sessions.values.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Sessions grouped for the sidebar: each Workspace in Host order, then unassigned Sessions.
+    func sections(matching query: String) -> [(workspace: Workspace?, sessions: [SessionInfo])] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let visible = sortedSessions.filter { session in
+            needle.isEmpty || session.title.lowercased().contains(needle) || (session.cwd?.lowercased().contains(needle) ?? false)
+        }
+        var result: [(Workspace?, [SessionInfo])] = []
+        var placed = Set<String>()
+        for workspace in workspaces {
+            let members = visible.filter { $0.workspaceId == workspace.id }
+            placed.formUnion(members.map(\.id))
+            if !members.isEmpty || needle.isEmpty { result.append((workspace, members)) }
+        }
+        let rest = visible.filter { !placed.contains($0.id) }
+        if !rest.isEmpty { result.append((nil, rest)) }
+        return result
+    }
+
+    func questions(for sessionId: String) -> [PendingQuestion] {
+        questions.values.filter { $0.sessionId == sessionId }.sorted { $0.callId < $1.callId }
+    }
+
+    func mode(of session: SessionInfo?) -> Mode {
+        Mode.of(session?.preset, presets: presets)
+    }
+
+    var modes: [Mode] { Mode.all(presets) }
+
+    // MARK: Session operations
+
+    func model(for sessionId: String) -> SessionModel {
+        if let model = models[sessionId] { return model }
+        let model = SessionModel(id: sessionId)
+        models[sessionId] = model
+        return model
+    }
+
+    func open(_ model: SessionModel) async {
+        guard let client else { return }
+        do {
+            let value = try await client.request("session.open", ["sessionId": model.id])
+            let items = (try? value["items"]?.decode([TranscriptItem].self)) ?? []
+            let live = value["live"].flatMap { $0.isNull ? nil : try? $0.decode(LiveAttempt.self) }
+            model.load(items: items, live: live, hasMore: value["hasMore"]?.bool == true)
+            if let session = try? value["session"]?.decode(SessionInfo.self) { sessions[session.id] = session }
+            Task { await loadCommands(for: model) }
+        } catch {
+            model.loading = false
+            model.loadError = error.localizedDescription
+        }
+    }
+
+    func close(_ model: SessionModel) {
+        guard let client, client.hostOnline else { return }
+        Task { _ = try? await client.request("session.close", ["sessionId": model.id]) }
+    }
+
+    func loadCommands(for model: SessionModel) async {
+        guard let client else { return }
+        if let commands = try? await client.decode("commands.list", ["sessionId": model.id], as: [SlashCommand].self) {
+            model.commands = commands
+        }
+    }
+
+    /// Send the composer text: a `/command` runs on the Host, anything else becomes a prompt.
+    func send(_ text: String, in model: SessionModel, steer: Bool = false) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client, !trimmed.isEmpty else { return false }
+        model.sending = true
+        defer { model.sending = false }
+        do {
+            let value = try await client.request("session.prompt", [
+                "sessionId": model.id,
+                "text": trimmed,
+                "mode": steer ? "steer" : "queue",
+                "timeZone": TimeZone.current.identifier,
+            ])
+            // Command output arrives in the transcript as a `command/done` notice.
+            if value["kind"]?.string == "command" { Haptics.success() }
+            if var session = sessions[model.id] {
+                session.blank = false
+                session.updatedAt = Date().timeIntervalSince1970 * 1000
+                sessions[model.id] = session
+            }
+            return true
+        } catch {
+            Haptics.error()
+            show(error)
+            return false
+        }
+    }
+
+    func cancel(_ sessionId: String) async {
+        guard let client else { return }
+        do {
+            _ = try await client.request("session.cancel", ["sessionId": sessionId])
+            Haptics.warning()
+        } catch { show(error) }
+    }
+
+    func createSession(workspaceId: String?, cwd: String? = nil, mode: String?) async -> String? {
+        guard let client else { return nil }
+        var params: [String: Any] = [:]
+        if let workspaceId { params["workspaceId"] = workspaceId } else if let cwd { params["cwd"] = cwd }
+        if let mode { params["preset"] = mode }
+        do {
+            let session = try await client.decode("session.create", params, as: SessionInfo.self)
+            sessions[session.id] = session
+            Haptics.success()
+            return session.id
+        } catch {
+            show(error)
+            return nil
+        }
+    }
+
+    func selectModel(_ ref: ModelRef, for sessionId: String) async {
+        guard let client else { return }
+        var params: [String: Any] = ["sessionId": sessionId, "provider": ref.provider, "model": ref.model]
+        if let effort = ref.effort { params["effort"] = effort }
+        do {
+            let selected = try await client.decode("session.model", params, as: ModelRef.self)
+            sessions[sessionId]?.model = selected
+        } catch { show(error) }
+    }
+
+    /// Switch mode. dsh fixes a Session's mode at its first turn, so a started Session gets a fresh sibling instead.
+    func selectMode(_ mode: Mode, for session: SessionInfo) async -> String? {
+        guard let client else { return nil }
+        if !session.blank {
+            let created = await createSession(workspaceId: session.workspaceId, cwd: session.cwd, mode: mode.id)
+            if let created { selectedSessionId = created }
+            return created
+        }
+        do {
+            let value = try await client.request("session.preset", ["sessionId": session.id, "preset": mode.id])
+            sessions[session.id]?.preset = value["preset"]?.string ?? mode.id
+            return session.id
+        } catch {
+            show(error)
+            return nil
+        }
+    }
+
+    func rename(_ sessionId: String, to title: String) async {
+        guard let client, !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        do {
+            _ = try await client.request("session.rename", ["sessionId": sessionId, "title": title])
+            sessions[sessionId]?.title = title
+        } catch { show(error) }
+    }
+
+    func answer(_ question: PendingQuestion, _ answers: [QuestionAnswer]) async -> Bool {
+        guard let client else { return false }
+        do {
+            _ = try await client.request("question.answer", [
+                "sessionId": question.sessionId,
+                "callId": question.callId,
+                "answers": answers.map(\.json),
+            ])
+            questions[question.callId] = nil
+            Haptics.success()
+            return true
+        } catch {
+            Haptics.error()
+            show(error)
+            return false
+        }
+    }
+
+    // MARK: Workspaces
+
+    func listDirectory(_ path: String?) async throws -> DirectoryListing {
+        guard let client else { throw RemoteError(code: "duo/unpaired", message: "Not paired") }
+        var params: [String: Any] = [:]
+        if let path { params["path"] = path }
+        return try await client.decode("fs.list", params, as: DirectoryListing.self)
+    }
+
+    func addWorkspace(path: String) async -> Workspace? {
+        guard let client else { return nil }
+        do {
+            let workspace = try await client.decode("workspaces.add", ["path": path], as: Workspace.self)
+            if !workspaces.contains(where: { $0.id == workspace.id }) { workspaces.append(workspace) }
+            Haptics.success()
+            return workspace
+        } catch {
+            show(error)
+            return nil
+        }
+    }
+
+    // MARK: Presentation
+
+    func show(_ error: Error) {
+        let message = (error as? RemoteError)?.message ?? error.localizedDescription
+        banner = Banner(title: "Something went wrong", message: message, isError: true)
+    }
+
+    func toggleFocus() {
+        Haptics.tap()
+        withAnimation(.snappy) {
+            columnVisibility = isFocused ? .automatic : .detailOnly
+        }
+    }
+}

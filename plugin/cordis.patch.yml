@@ -1,0 +1,10 @@
+# DSH Duo companion bundle. Installs one Host row; override `config` from your
+# profile's cordis.patch.yml (same id) to change the relay or behavior.
+- insert:
+    - id: duo-remote
+      name: dsh-plugin-duo-remote
+      config:
+        # Your relay (see relay/README.md). DSH_DUO_RELAY wins when this is unset.
+        relay: !!js process.env.DSH_DUO_RELAY
+        holdQuestions: true
+        historyMessages: 200

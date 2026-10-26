@@ -1,0 +1,24 @@
+{
+  "name": "dsh-duo-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-trust WebSocket relay and APNs sender for the DSH Duo iPhone app",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/node.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "deploy:cloudflare": "wrangler deploy"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250927.0",
+    "@types/node": "^24.5.2",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.2"
+  }
+}

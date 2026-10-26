@@ -1,0 +1,39 @@
+{
+  "name": "dsh-plugin-duo-remote",
+  "description": "Drive DeepSeek Harness from the DSH Duo iPhone app, from anywhere, end-to-end encrypted",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "iphone", "remote"],
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": { "dsh-duo": "lib/cli.js" },
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib/**/*.js", "lib/**/*.d.ts", "cordis.patch.yml", "icon.svg", "README.md"],
+  "icon": "./icon.svg",
+  "engines": { "node": ">=22.18" },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml",
+      "listedByDefault": true
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && chmod +x lib/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.9.2"
+  }
+}

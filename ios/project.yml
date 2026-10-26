@@ -1,0 +1,106 @@
+name: DSHDuo
+options:
+  bundleIdPrefix: ai.deepseek.harness
+  deploymentTarget:
+    iOS: "27.1"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  DSHDuo:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+    entitlements:
+      path: App/DSHDuo.entitlements
+      properties:
+        aps-environment: development
+        com.apple.security.application-groups:
+          - group.ai.deepseek.harness.duo
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: DSH Duo
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - remote-notification
+        NSCameraUsageDescription: DSH Duo uses the camera to scan the pairing QR code shown by dsh on your Mac.
+        ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: ai.deepseek.harness.duo.pair
+            CFBundleURLSchemes:
+              - dshduo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.deepseek.harness.duo
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - target: DSHDuoNotifications
+        embed: true
+  DSHDuoNotifications:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotificationService
+      - Shared
+    entitlements:
+      path: NotificationService/DSHDuoNotifications.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.ai.deepseek.harness.duo
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: DSH Duo Notifications
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.deepseek.harness.duo.notifications
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+  DSHDuoTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: DSHDuo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.deepseek.harness.duo.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/DSHDuo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DSHDuo
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  DSHDuo:
+    build:
+      targets:
+        DSHDuo: all
+        DSHDuoTests: [test]
+    test:
+      targets:
+        - DSHDuoTests
