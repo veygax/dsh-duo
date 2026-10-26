@@ -63,6 +63,8 @@ interface DemoSession {
   preset: string
   title: string
   turn: number
+  /** Prompts sent with mode "queue" during a turn; each runs as its own turn afterwards. */
+  queued?: string[]
 }
 
 const now = Date.now()
@@ -214,6 +216,8 @@ async function runTurn(id: string, prompt: string): Promise<void> {
   append(id, ev('turn/end', { turn, reason: { kind: 'completed' } }, Date.now()))
   entry.summary = { ...entry.summary, running: false, updatedAt: Date.now() }
   emit('api-session/status', id, false)
+  const next = entry.queued?.shift()
+  if (next !== undefined) void runTurn(id, next)
 }
 
 const catalog = {
@@ -270,7 +274,16 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
     }
     case 'session/prompt': {
       const content = (req.content as Json[])[0]!
-      void runTurn(String(req.sessionId), String(content.text))
+      const id = String(req.sessionId), text = String(content.text)
+      const entry = sessions.get(id)!
+      // Like dsh: a steer joins the running turn at its next step, a queued prompt waits for the turn to end.
+      if (entry.summary.running === true && req.mode === 'steer') {
+        setTimeout(() => append(id, ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user-rpc' }, content: [{ type: 'text', text }] }, Date.now())), 1500)
+      } else if (entry.summary.running === true) {
+        (entry.queued ??= []).push(text)
+      } else {
+        void runTurn(id, text)
+      }
       return { accepted: true }
     }
     case 'session/cancel': return { accepted: true }

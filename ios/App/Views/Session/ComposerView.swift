@@ -44,10 +44,16 @@ struct ComposerView: View {
                     .glassEffectID("commands", in: glass)
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    TextField(running ? "Add to the queue or steer…" : "Message DeepSeek", text: $model.draft, axis: .vertical)
+                    TextField(running ? "Steer this turn…" : "Message DeepSeek", text: $model.draft, axis: .vertical)
                         .lineLimit(1...8)
                         .focused(focused)
                         .textInputAutocapitalization(.sentences)
+                        // While a turn runs the send control is a menu, which has no shortcut of its own.
+                        .onKeyPress(.return, phases: .down) { press in
+                            guard running, press.modifiers.contains(.command) else { return .ignored }
+                            send(steer: true)
+                            return .handled
+                        }
                         .onKeyPress(.escape) {
                             focused.wrappedValue = false
                             return .handled
@@ -103,24 +109,31 @@ struct ComposerView: View {
             .buttonBorderShape(.circle)
             .tint(.red)
             .accessibilityHint("Stops the current turn")
+        } else if running {
+            // Tap steers; press and hold for the choice. Menu's primary action is the system's
+            // tap-or-hold control, so the hold gets its haptic and menu presentation for free.
+            Menu {
+                Button("Steer This Turn", systemImage: "arrow.turn.down.right") { send(steer: true) }
+                Button("Send After This Turn", systemImage: "clock") { send(steer: false) }
+            } label: {
+                sendLabel
+            } primaryAction: {
+                send(steer: true)
+            }
+            .menuOrder(.fixed)
+            .sendButtonStyle(disabled: !canSend, sending: model.sending)
+            .accessibilityHint("Steers the current turn; press and hold to send after it instead")
         } else {
-            Button("Send", systemImage: "arrow.up") { send(steer: false) }
-                .labelStyle(.iconOnly)
-                .fontWeight(.semibold)
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .disabled(!canSend)
+            Button(action: { send(steer: false) }) { sendLabel }
+                .sendButtonStyle(disabled: !canSend, sending: model.sending)
                 // A real shortcut, so it appears in the hardware keyboard's ⌘ overlay.
                 .keyboardShortcut(.return, modifiers: .command)
-                .overlay { if model.sending { ProgressView().controlSize(.small) } }
-                .contextMenu {
-                    if running {
-                        Button("Send Now (Steer)", systemImage: "arrow.turn.down.right") { send(steer: true) }
-                        Button("Queue After This Turn", systemImage: "text.line.last.and.arrowtriangle.forward") { send(steer: false) }
-                    }
-                }
-                .accessibilityHint(running ? "Queues the message; press and hold to steer now" : "Sends the message")
+                .accessibilityHint("Sends the message")
         }
+    }
+
+    private var sendLabel: some View {
+        Label("Send", systemImage: "arrow.up")
     }
 
     private func send(steer: Bool) {
@@ -132,6 +145,17 @@ struct ComposerView: View {
         Task {
             if await !store.send(text, in: model, steer: steer) { model.draft = text }
         }
+    }
+}
+
+private extension View {
+    func sendButtonStyle(disabled: Bool, sending: Bool) -> some View {
+        labelStyle(.iconOnly)
+            .fontWeight(.semibold)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .disabled(disabled)
+            .overlay { if sending { ProgressView().controlSize(.small) } }
     }
 }
 

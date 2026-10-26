@@ -53,7 +53,37 @@ struct UserBubble: View {
     }
 }
 
-/// In full screen on the open inner display, thoughts and tool calls open in the side pane
+/// A message sent during a turn that dsh has not taken in yet.
+/// Stopping a turn leaves these in dsh's inbox without starting another, so once nothing runs
+/// they wait for the next message, which carries them in ahead of it.
+struct PendingBubble: View {
+    let message: PendingMessage
+    let running: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack {
+                Spacer(minLength: 48)
+                Text(message.text)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.accentColor.gradient.opacity(0.55), in: .rect(cornerRadius: 20))
+            }
+            Label(status, systemImage: running ? (message.steer ? "arrow.turn.down.right" : "clock") : "pause.circle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var status: String {
+        if !running { return "Sends with your next message" }
+        return message.steer ? "Steering this turn" : "Queued for after this turn"
+    }
+}
+
+/// On the open inner display with the sidebar hidden, thoughts and tool calls open in the side pane
 /// instead of expanding inline. The pane's owner supplies this; elsewhere it is nil.
 struct Inspector {
     var selectedId: String?

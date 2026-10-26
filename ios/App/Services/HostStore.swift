@@ -313,6 +313,8 @@ final class HostStore {
         guard let client, !trimmed.isEmpty else { return false }
         model.sending = true
         defer { model.sending = false }
+        let echo = sessions[model.id]?.running == true && !trimmed.hasPrefix("/")
+            ? model.addPending(trimmed, steer: steer) : nil
         do {
             let value = try await client.request("session.prompt", [
                 "sessionId": model.id,
@@ -329,6 +331,7 @@ final class HostStore {
             }
             return true
         } catch {
+            if let echo { model.dropPending(echo) }
             Haptics.error()
             show(error)
             return false

@@ -83,6 +83,11 @@ struct TranscriptView: View {
                         .id("working")
                 }
 
+                ForEach(model.pending) { message in
+                    PendingBubble(message: message, running: session?.running == true)
+                        .id(message.id)
+                }
+
                 Color.clear.frame(height: 1).id(Self.end)
             }
             // A reading column of at most 780 points, centred on wide screens.
@@ -110,6 +115,7 @@ struct TranscriptView: View {
         }
         .onChange(of: model.loading, initial: true) { if !model.loading { stickToEnd(proxy, force: true) } }
         .onChange(of: model.items.count) { stickToEnd(proxy) }
+        .onChange(of: model.pending.count) { stickToEnd(proxy) }
         .onChange(of: model.live?.text.count ?? 0) { stickToEnd(proxy) }
         .onChange(of: model.live?.thinking.count ?? 0) { stickToEnd(proxy) }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { _, _ in stickToEnd(proxy) }

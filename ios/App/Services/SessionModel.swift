@@ -16,6 +16,9 @@ final class SessionModel: Identifiable {
     var draft = ""
     var commands: [SlashCommand] = []
     var sending = false
+    /// Messages sent during a turn. dsh only records them when it takes them in: at its next step
+    /// when steering, after the turn when queued. Until then they show here so a send never looks lost.
+    private(set) var pending: [PendingMessage] = []
 
     init(id: String) {
         self.id = id
@@ -24,6 +27,7 @@ final class SessionModel: Identifiable {
     func load(items: [TranscriptItem], live: LiveAttempt?, hasMore: Bool) {
         self.items = items
         rebuildIndex()
+        settlePending(items)
         self.live = live
         self.hasMore = hasMore
         loading = false
@@ -31,6 +35,7 @@ final class SessionModel: Identifiable {
     }
 
     func merge(_ incoming: [TranscriptItem], replace: Bool) {
+        defer { settlePending(incoming) }
         if replace {
             items = incoming
             rebuildIndex()
@@ -65,6 +70,24 @@ final class SessionModel: Identifiable {
         if let tools = try? delta["tools"]?.decode([LiveTool].self) { live?.tools = tools }
     }
 
+    func addPending(_ text: String, steer: Bool) -> PendingMessage.ID {
+        let message = PendingMessage(text: text, steer: steer)
+        pending.append(message)
+        return message.id
+    }
+
+    func dropPending(_ id: PendingMessage.ID) {
+        pending.removeAll { $0.id == id }
+    }
+
+    /// The transcript now holds these messages, so their stand-ins go.
+    private func settlePending(_ incoming: [TranscriptItem]) {
+        guard !pending.isEmpty else { return }
+        for item in incoming where item.kind == .user {
+            if let match = pending.firstIndex(where: { $0.text == item.text }) { pending.remove(at: match) }
+        }
+    }
+
     private func rebuildIndex() {
         index = Dictionary(uniqueKeysWithValues: items.enumerated().map { ($1.id, $0) })
     }
@@ -74,4 +97,11 @@ final class SessionModel: Identifiable {
         guard let last = items.last(where: { $0.kind != .notice }) else { return false }
         return last.kind == .user
     }
+}
+
+struct PendingMessage: Identifiable {
+    let id = UUID()
+    let text: String
+    /// Joins the running turn rather than waiting for it to end.
+    let steer: Bool
 }
