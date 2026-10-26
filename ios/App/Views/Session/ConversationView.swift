@@ -1,24 +1,18 @@
 import SwiftUI
 
 extension EnvironmentValues {
-    /// Room is kept on the right for the side pane.
-    @Entry var paneReserved = false
-    /// Horizontal offset of the transcript text while it glides back to centre after the pane closes.
-    @Entry var transcriptGlide: CGFloat = 0
+    /// The inspector column beside the chat is open.
+    @Entry var paneOpen = false
 }
 
 /// Transcript with the composer and any open questions pinned beneath it.
 struct ConversationView: View {
     @Environment(HostStore.self) private var store
-    @Environment(\.paneReserved) private var paneReserved
     let model: SessionModel
     let sessionId: String
 
     var body: some View {
         TranscriptView(model: model, session: store.sessions[sessionId])
-            // The transcript takes its new width in one step. Animated, its rows rewrap shorter
-            // while the scroll offset lags, scrolling it past its end until it snaps back.
-            .transaction(value: paneReserved) { $0.animation = nil }
             // A bar, not a plain inset: content scrolling beneath it gets the system scroll edge effect.
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 // One container renders the question cards, command list and composer together
@@ -40,8 +34,11 @@ struct ConversationView: View {
 
 struct TranscriptView: View {
     @Environment(HostStore.self) private var store
-    @Environment(\.paneReserved) private var paneReserved
-    @Environment(\.transcriptGlide) private var glide
+    @Environment(\.paneOpen) private var paneOpen
+    /// Horizontal offset that glides the text column to its new place when the inspector opens or
+    /// closes, so the chat is pushed aside rather than jumping.
+    @State private var glide: CGFloat = 0
+    @State private var glidePending = false
     @Environment(\.layoutEpoch) private var layoutEpoch
     let model: SessionModel
     let session: SessionInfo?
@@ -56,6 +53,12 @@ struct TranscriptView: View {
     @State private var reading = Reading()
 
     private static let end = "transcript-end"
+
+    /// Where the text starts in a transcript this wide: a centred column of at most 780 points
+    /// with 16 points either side.
+    private static func textLeft(in width: CGFloat) -> CGFloat {
+        (width - min(812, width)) / 2 + 16
+    }
 
     private final class Reading {
         var atBottom = true
@@ -107,6 +110,9 @@ struct TranscriptView: View {
             .frame(maxWidth: .infinity)
             .offset(x: glide)
         }
+        // Rows take their new width in one step when the inspector opens or closes; animated, each box
+        // would morph between widths while its text has already rewrapped.
+        .transaction(value: paneOpen) { $0.animation = nil }
         .id(generation)
         .onScrollTargetVisibilityChange(idType: String.self) { topId = $0.first }
         .defaultScrollAnchor(.bottom)
@@ -118,7 +124,18 @@ struct TranscriptView: View {
             reading.topId = topId
         }
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: paneReserved) {
+        .onChange(of: paneOpen) {
+            glidePending = true
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                glidePending = false
+            }
+        }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { old, new in
+            guard glidePending, old > 0, old != new else { return }
+            glidePending = false
+            glide = Self.textLeft(in: old) - Self.textLeft(in: new)
+            Task { withAnimation(.smooth(duration: 0.35)) { glide = 0 } }
             // Rewrapping changes the transcript's height; keep the end in view if that's where the user was.
             if reading.atBottom { Task { proxy.scrollTo(Self.end, anchor: .bottom) } }
         }

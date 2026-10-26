@@ -1,19 +1,13 @@
 import SwiftUI
 
-/// Right-hand pane, beside the chat once the sidebar is hidden, showing one thought or tool call in full.
-/// Swipe it to the right (or tap ✕) to close it.
+/// Inspector beside the chat once the sidebar is hidden, showing one thought or tool call in full.
+/// Swipe right (or tap ✕) to close it.
 struct DetailPane: View {
     static let liveThinkingId = "live-thinking"
 
     let model: SessionModel
     let item: TranscriptItem
     let onClose: () -> Void
-    @State private var drag: CGFloat = 0
-    /// Decided once per gesture, so a swipe that drifts vertically never freezes the pane mid-way.
-    @State private var axis: Axis?
-    /// True while a finger is down; the system resets it even when it cancels the gesture.
-    @GestureState private var dragging = false
-    @State private var closing = false
 
     /// The newest version of the item: thoughts keep streaming and tool calls finish while the pane is open.
     private var current: TranscriptItem {
@@ -73,41 +67,17 @@ struct DetailPane: View {
             }
             .defaultScrollAnchor(item.id == Self.liveThinkingId ? .bottom : .top)
         }
-        // Under the bars, but not into the side inset, so sliding it by its width hides all of it.
-        .background(.background, ignoresSafeAreaEdges: .vertical)
-        .offset(x: drag)
         .simultaneousGesture(swipe)
-        .onChange(of: dragging) { _, dragging in
-            // A cancelled drag never reaches onEnded; settle back instead of staying offset.
-            guard !dragging, !closing else { return }
-            axis = nil
-            if drag != 0 { withAnimation(.snappy) { drag = 0 } }
-        }
         .accessibilityElement(children: .contain)
         .accessibilityAction(.escape, onClose)
     }
 
+    /// A rightward flick closes the inspector; vertical drags keep scrolling.
     private var swipe: some Gesture {
-        DragGesture(minimumDistance: 16)
-            .updating($dragging) { _, dragging, _ in dragging = true }
-            .onChanged { value in
-                // Only horizontal swipes move the pane; vertical drags keep scrolling.
-                if axis == nil {
-                    axis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
-                }
-                guard axis == .horizontal else { return }
-                drag = max(0, value.translation.width)
-            }
+        DragGesture(minimumDistance: 24)
             .onEnded { value in
-                let horizontal = axis == .horizontal
-                axis = nil
-                if horizontal && (drag > 120 || value.predictedEndTranslation.width > 260) {
-                    // Leave the offset where the finger let go; the removal slides on from there.
-                    closing = true
-                    onClose()
-                } else if drag != 0 {
-                    withAnimation(.snappy) { drag = 0 }
-                }
+                let dx = value.translation.width, dy = value.translation.height
+                if dx > abs(dy) * 2 && (dx > 120 || value.predictedEndTranslation.width > 260) { onClose() }
             }
     }
 }
