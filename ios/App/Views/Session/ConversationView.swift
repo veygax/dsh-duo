@@ -49,6 +49,11 @@ struct TranscriptView: View {
     @State private var placeKeeper = PlaceKeeper()
     /// The row just picked from search, marked for a moment so the eye finds it.
     @State private var marked: String?
+    /// The rows have been put at the end and stopped resizing. Until then the List draws its first
+    /// rows and then the end, and rows settling from estimated heights drag what is shown with them,
+    /// so it stays hidden for those few frames.
+    @State private var placed = false
+    @State private var contentHeight: CGFloat = 0
 
     private static let end = "transcript-end"
 
@@ -134,7 +139,15 @@ struct TranscriptView: View {
         } action: { _, atEnd in
             following = atEnd
         }
-        .onChange(of: model.loading, initial: true) { if !model.loading { stickToEnd(proxy, force: true) } }
+        .opacity(placed || model.loading || model.loadError != nil ? 1 : 0)
+        .onScrollGeometryChange(for: CGFloat.self, of: \.contentSize.height) { _, height in
+            contentHeight = height
+        }
+        .task(id: model.loading) {
+            guard !model.loading, !placed else { return }
+            await place(proxy)
+        }
+        .onChange(of: model.loading) { if !model.loading { stickToEnd(proxy, force: true) } }
         .onChange(of: model.items.count) { stickToEnd(proxy) }
         .onChange(of: model.pending.count) { stickToEnd(proxy) }
         .onChange(of: model.live?.text.count ?? 0) { stickToEnd(proxy) }
@@ -149,6 +162,20 @@ struct TranscriptView: View {
             withAnimation(.smooth(duration: 0.8)) { marked = nil }
         }
         }
+    }
+
+    /// Scroll to the end until the rows stop resizing, then show them.
+    private func place(_ proxy: ScrollViewProxy) async {
+        var last: CGFloat = -1
+        for step in 0..<15 {
+            proxy.scrollTo(Self.end, anchor: .bottom)
+            try? await Task.sleep(for: .milliseconds(16))
+            if Task.isCancelled { return }
+            if step >= 2 && contentHeight == last { break }
+            last = contentHeight
+        }
+        proxy.scrollTo(Self.end, anchor: .bottom)
+        withAnimation(.easeOut(duration: 0.15)) { placed = true }
     }
 
     private func stickToEnd(_ proxy: ScrollViewProxy, force: Bool = false) {

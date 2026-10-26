@@ -59,6 +59,7 @@ struct DetailPane: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .messageMenu(shown.text ?? "")
                     } else {
                         ToolDetail(item: shown)
                     }

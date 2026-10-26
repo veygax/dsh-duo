@@ -101,6 +101,7 @@ struct SidebarView: View {
         if let cwd = session.cwd {
             Button("Copy Folder Path", systemImage: "doc.on.doc", action: tap { UIPasteboard.general.string = cwd })
         }
+        Button("Copy Session ID", systemImage: "number", action: tap { UIPasteboard.general.string = session.id })
     }
 }
 

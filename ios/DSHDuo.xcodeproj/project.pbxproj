@@ -21,6 +21,7 @@
 		3914D7496D121C18D6027BC2 /* DSHDuoNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D6CC76C18373C0747D4EFE25 /* DSHDuoNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		39351F61912BC2FFBA76C814 /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398F723FF55C9BCFBBE97519 /* PairingStore.swift */; };
 		43FC4A48B8F4D08272381431 /* ItemViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4614BDF2C92334DC5EC9D83 /* ItemViews.swift */; };
+		45DFEB1B9F353EC48D8C3B3C /* SelectTextSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338C4E47FB1EAE43FDD05726 /* SelectTextSheet.swift */; };
 		4BC1185B00D9D2EC39561038 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8ED8525A7E7B1625F5576F1 /* SessionModel.swift */; };
 		593547C2D2E2C7D646E81836 /* AddWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E46FE1DF6D31195F57F2F6C /* AddWorkspaceSheet.swift */; };
 		5DF12C98361A035A3386F894 /* DSHDuoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17499819E8DC35D8A497900 /* DSHDuoTests.swift */; };
@@ -90,6 +91,7 @@
 		20F7305D85FBE6CB3C25B208 /* DSHDuoNotifications.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DSHDuoNotifications.entitlements; sourceTree = "<group>"; };
 		24E71C2244D2F3864E54DB6C /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		26731E78B69D81424C13753A /* FoldAware.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldAware.swift; sourceTree = "<group>"; };
+		338C4E47FB1EAE43FDD05726 /* SelectTextSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectTextSheet.swift; sourceTree = "<group>"; };
 		394C23E736008599B6A30DAE /* DSHDuo.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DSHDuo.entitlements; sourceTree = "<group>"; };
 		398F723FF55C9BCFBBE97519 /* PairingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingStore.swift; sourceTree = "<group>"; };
 		3EACB8C47C1FBB714E82B80B /* JSONValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONValue.swift; sourceTree = "<group>"; };
@@ -147,6 +149,7 @@
 				4E46FE1DF6D31195F57F2F6C /* AddWorkspaceSheet.swift */,
 				AE8729C9020E5E0C01FC837C /* FolderPicker.swift */,
 				114705792DD8A39638541EBB /* NewSessionSheet.swift */,
+				338C4E47FB1EAE43FDD05726 /* SelectTextSheet.swift */,
 				F3695CDB13A5BD8C6BA16208 /* SettingsView.swift */,
 			);
 			path = Sheets;
@@ -433,6 +436,7 @@
 				EB760A5E9358BDD0B34E647B /* RelayClient.swift in Sources */,
 				BEAA77104C8E78D01D8569BF /* RootView.swift in Sources */,
 				8A92C9A44596E007730BBB0A /* SearchResultsView.swift in Sources */,
+				45DFEB1B9F353EC48D8C3B3C /* SelectTextSheet.swift in Sources */,
 				4BC1185B00D9D2EC39561038 /* SessionModel.swift in Sources */,
 				713DC673455E96F42DF72476 /* SessionView.swift in Sources */,
 				E978BF499DCEDB8E019A221E /* SettingsView.swift in Sources */,

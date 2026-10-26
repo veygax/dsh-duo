@@ -181,6 +181,7 @@ struct SessionView: View {
                         Button("Copy Folder Path", systemImage: "doc.on.doc", action: tap { UIPasteboard.general.string = cwd })
                     }
                 }
+                Button("Copy Session ID", systemImage: "number", action: tap { UIPasteboard.general.string = sessionId })
                 Button("Reload", systemImage: "arrow.clockwise", action: tap {
                     if let model { Task { await store.open(model) } }
                 })

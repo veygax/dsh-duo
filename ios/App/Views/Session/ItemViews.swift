@@ -8,7 +8,7 @@ struct ItemView: View {
         case .user: UserBubble(item: item)
         case .text:
             MarkdownText(item.text ?? "")
-                .contextMenu { CopyButton(text: item.text ?? "") }
+                .messageMenu(item.text ?? "", markdown: true)
         case .thinking: ThinkingView(id: item.id, text: item.text ?? "", live: false)
         case .tool: ToolCallView(item: item)
         case .notice: NoticeView(item: item)
@@ -46,7 +46,7 @@ struct UserBubble: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(Color.accentColor.gradient, in: .rect(cornerRadius: 20))
-            .contextMenu { CopyButton(text: item.text ?? "") }
+            .messageMenu(item.text ?? "")
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("You: \(item.text ?? "")")
@@ -150,7 +150,7 @@ struct ThinkingView: View {
                         Rectangle().fill(.quaternary).frame(width: 2)
                     }
                     .transition(.opacity)
-                    .contextMenu { CopyButton(text: text) }
+                    .messageMenu(text)
             }
         }
     }
@@ -306,6 +306,7 @@ struct NoticeView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.fill.quaternary.opacity(isError ? 0 : 1), in: .rect(cornerRadius: 12))
+        .messageMenu(item.text ?? "")
     }
 }
 
