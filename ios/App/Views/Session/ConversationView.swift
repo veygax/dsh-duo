@@ -46,12 +46,19 @@ struct TranscriptView: View {
     /// The end of the conversation is on screen. New output, and width changes that rewrap it,
     /// keep it there; once the user scrolls up, nothing moves them.
     @State private var following = true
+    @State private var placeKeeper = PlaceKeeper()
 
     private static let end = "transcript-end"
 
-    var body: some View {
-        ScrollViewReader { proxy in
-        List {
+    /// The loading or error row ahead of the items.
+    private var leadRows: Int { model.loading || model.loadError != nil ? 1 : 0 }
+    /// The live or working row, the pending messages and the end marker after them.
+    private var trailRows: Int { (model.live != nil || session?.running == true ? 1 : 0) + model.pending.count + 1 }
+
+    /// The rows and their List styling; behaviour is added in `body`.
+    private var list: some View {
+        placeKeeper.expect(lead: leadRows, rows: leadRows + model.items.count + trailRows)
+        return List {
             Group {
                 if model.loading {
                     ProgressView("Loading conversation…")
@@ -88,7 +95,9 @@ struct TranscriptView: View {
                         .id(message.id)
                 }
 
-                Color.clear.frame(height: 1).id(Self.end)
+                Color.clear.frame(height: 1)
+                    .background(ScrollViewFinder { placeKeeper.attach($0, model: model) })
+                    .id(Self.end)
             }
             // A reading column of at most 780 points, centred on wide screens.
             .frame(maxWidth: 780, alignment: .leading)
@@ -108,6 +117,11 @@ struct TranscriptView: View {
         // would morph between widths while its text has already rewrapped.
         .transaction(value: paneOpen) { $0.animation = nil }
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+        list
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.visibleRect.maxY >= geometry.contentSize.height + geometry.contentInsets.bottom - 40
         } action: { _, atEnd in
@@ -125,6 +139,137 @@ struct TranscriptView: View {
     private func stickToEnd(_ proxy: ScrollViewProxy, force: Bool = false) {
         guard force || following else { return }
         Task { proxy.scrollTo(Self.end, anchor: .bottom) }
+    }
+}
+
+/// Older history is read in the background and lands above the rows on screen, then those rows settle
+/// from estimated to real heights. A List keeps its offset through both, which carries what the reader
+/// is looking at up or down, and SwiftUI offers no say in it. So this notes the top row on screen as
+/// the reader scrolls, and when rows go in above it moves the offset to put that row back, in the same
+/// layout pass and before anything is drawn. Other size changes, such as rows sizing as they scroll
+/// into view, are the List's own business.
+@MainActor
+final class PlaceKeeper {
+    private weak var collectionView: UICollectionView?
+    private weak var model: SessionModel?
+    private var observations: [NSKeyValueObservation] = []
+    /// Rows ahead of the transcript items, and all rows, as the view last rendered them. The model
+    /// changes a pass before the List applies it; until the List's row count matches, its rows and
+    /// the model's items do not line up and nothing is noted or corrected.
+    private var lead = 0
+    private var rows = 0
+    private var anchorId: String?
+    /// The anchor row's top, relative to the top of the scrolled content.
+    private var anchorTop: CGFloat = 0
+    /// The offset the anchor was noted at; a jump far from it (scrolling to the end, say) is not drift.
+    private var anchorOffset: CGFloat = 0
+    /// The reader was at the end when last noted; then the end, not a row, is what stays put.
+    private var atEnd = true
+    /// The first item when last noted; another one means older rows went in above.
+    private var firstId: String?
+    /// Rows just inserted above are still settling from estimated to real heights. Corrections follow
+    /// them until the reader touches the screen; anything else is left to the List and the reader.
+    private var settling = false
+    private var correcting = false
+
+    func expect(lead: Int, rows: Int) {
+        self.lead = lead
+        self.rows = rows
+    }
+
+    func attach(_ scrollView: UIScrollView, model: SessionModel) {
+        guard let collectionView = scrollView as? UICollectionView, collectionView !== self.collectionView else { return }
+        self.collectionView = collectionView
+        self.model = model
+        observations = [
+            collectionView.observe(\.contentOffset) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.noteAnchor() }
+            },
+            collectionView.observe(\.contentSize) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.restoreAnchor() }
+            },
+        ]
+        noteAnchor()
+    }
+
+    private var inSync: Bool {
+        guard let collectionView, collectionView.numberOfSections == 1 else { return false }
+        return collectionView.numberOfItems(inSection: 0) == rows
+    }
+
+    private func noteAnchor() {
+        guard !correcting, inSync, let collectionView, let items = model?.items,
+              let path = collectionView.indexPathsForVisibleItems.min(),
+              items.indices.contains(path.item - lead),
+              let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return }
+        // Mid-update the rows already have their new places but the offset has not caught up; a row
+        // that is not actually on screen then is not where the reader is, so keep the last anchor.
+        let offset = collectionView.contentOffset.y
+        guard frame.maxY > offset, frame.minY < offset + collectionView.bounds.height else { return }
+        if collectionView.isTracking { settling = false }
+        atEnd = offset >= endOffset(collectionView) - 40
+        firstId = items.first?.id
+        anchorId = items[path.item - lead].id
+        anchorTop = frame.minY - offset
+        anchorOffset = offset
+    }
+
+    private func restoreAnchor() {
+        guard inSync, let collectionView, let items = model?.items, let anchorId else { return noteAnchor() }
+        let prepended = items.first?.id != firstId
+        guard prepended || (settling && !collectionView.isTracking && !collectionView.isDecelerating) else {
+            return noteAnchor()
+        }
+        guard abs(collectionView.contentOffset.y - anchorOffset) < collectionView.bounds.height,
+              let index = items.firstIndex(where: { $0.id == anchorId }),
+              let frame = collectionView.layoutAttributesForItem(at: IndexPath(item: lead + index, section: 0))?.frame
+        else { return noteAnchor() }
+        let drift = atEnd
+            ? endOffset(collectionView) - collectionView.contentOffset.y
+            : frame.minY - collectionView.contentOffset.y - anchorTop
+        if prepended {
+            settling = true
+            firstId = items.first?.id
+        }
+        guard abs(drift) > 0.5 else { return }
+        correcting = true
+        collectionView.contentOffset.y += drift
+        anchorOffset = collectionView.contentOffset.y
+        correcting = false
+    }
+
+    private func endOffset(_ collectionView: UICollectionView) -> CGFloat {
+        let insets = collectionView.adjustedContentInset
+        return max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+    }
+}
+
+/// Hands over the UIKit scroll view behind the List this sits in.
+private struct ScrollViewFinder: UIViewRepresentable {
+    let found: (UIScrollView) -> Void
+
+    func makeUIView(context: Context) -> FinderView { FinderView(found: found) }
+    func updateUIView(_ view: FinderView, context: Context) {}
+
+    final class FinderView: UIView {
+        let found: (UIScrollView) -> Void
+
+        init(found: @escaping (UIScrollView) -> Void) {
+            self.found = found
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            var view = superview
+            while let current = view {
+                if let scrollView = current as? UIScrollView { return found(scrollView) }
+                view = current.superview
+            }
+        }
     }
 }
 

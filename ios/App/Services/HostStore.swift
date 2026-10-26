@@ -187,6 +187,10 @@ final class HostStore {
             guard let id = event["sessionId"]?.string, let model = models[id],
                   let items = try? event["items"]?.decode([TranscriptItem].self) else { return }
             model.merge(items, replace: event["replace"]?.bool == true)
+            if let hasMore = event["hasMore"]?.bool {
+                model.hasMore = hasMore
+                if hasMore { Task { await loadHistory(model) } }
+            }
         case "session.live":
             guard let id = event["sessionId"]?.string, let model = models[id] else { return }
             model.applyLive(event)
@@ -265,6 +269,20 @@ final class HostStore {
         return model
     }
 
+    /// Read the rest of the history, newest page first, right after the recent window opens, so
+    /// scrolling up never reaches an edge and waits.
+    func loadHistory(_ model: SessionModel) async {
+        guard let client, !model.loadingOlder else { return }
+        model.loadingOlder = true
+        defer { model.loadingOlder = false }
+        while model.hasMore, !model.loading {
+            guard let value = try? await client.request("session.older", ["sessionId": model.id]) else { return }
+            let items = (try? value["items"]?.decode([TranscriptItem].self)) ?? []
+            model.prepend(items, hasMore: value["hasMore"]?.bool == true)
+            if items.isEmpty { return }
+        }
+    }
+
     func open(_ model: SessionModel) async {
         guard let client else { return }
         do {
@@ -272,6 +290,7 @@ final class HostStore {
             let items = (try? value["items"]?.decode([TranscriptItem].self)) ?? []
             let live = value["live"].flatMap { $0.isNull ? nil : try? $0.decode(LiveAttempt.self) }
             model.load(items: items, live: live, hasMore: value["hasMore"]?.bool == true)
+            Task { await loadHistory(model) }
             if let session = try? value["session"]?.decode(SessionInfo.self) { sessions[session.id] = session }
             Task { await loadCommands(for: model) }
         } catch {

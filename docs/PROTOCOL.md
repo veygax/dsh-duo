@@ -90,6 +90,7 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `fs.list` | `path?` | `{ path, home, parent?, entries: [{ name, path, hidden }] }` |
 | `session.create` | `workspaceId?`, `cwd?`, `preset?` | `Session` |
 | `session.open` | `sessionId` | `{ session, items: Item[], hasMore }` then `session.items`/`session.live` events |
+| `session.older` | `sessionId` (open) | `{ items: Item[], hasMore }`: the page before the oldest item held, read with dsh's `session/page`; the phone reads every page in the background right after `session.open` |
 | `session.close` | `sessionId` | — |
 | `session.prompt` | `sessionId`, `text`, `mode: "queue"\|"steer"` | `{ kind: "prompt" \| "command" }` |
 | `session.cancel` | `sessionId` | — |
@@ -108,7 +109,7 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `sessions.upsert` | `session: Session` |
 | `sessions.remove` | `sessionId` |
 | `workspaces.changed` | `workspaces: Workspace[]` |
-| `session.items` | `sessionId`, `items: Item[]` (append or replace by `id`) |
+| `session.items` | `sessionId`, `items: Item[]` (append or replace by `id`), `replace?`, `hasMore?` (with `replace`: older history is available again) |
 | `session.live` | `sessionId`, `live: LiveAttempt \| null` (streaming assistant output) |
 | `question` | `sessionId`, `callId`, `questions: Question[]`, `title` |
 | `question.resolved` | `sessionId`, `callId` |

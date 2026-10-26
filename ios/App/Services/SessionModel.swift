@@ -11,7 +11,9 @@ final class SessionModel: Identifiable {
     private(set) var live: LiveAttempt?
     var loading = true
     var loadError: String?
+    /// dsh holds history older than `items`, read a page at a time as the user scrolls up.
     var hasMore = false
+    var loadingOlder = false
     /// Unsent composer text, kept while the user browses other Sessions.
     var draft = ""
     var commands: [SlashCommand] = []
@@ -54,6 +56,16 @@ final class SessionModel: Identifiable {
             self.live?.text = ""
             self.live?.thinking = ""
         }
+    }
+
+    /// Put a page of older history in front of what is shown.
+    func prepend(_ older: [TranscriptItem], hasMore: Bool) {
+        self.hasMore = hasMore
+        let fresh = older.filter { index[$0.id] == nil }
+        for item in older where index[item.id] != nil { items[index[item.id]!] = item }
+        guard !fresh.isEmpty else { return }
+        items.insert(contentsOf: fresh, at: 0)
+        rebuildIndex()
     }
 
     func applyLive(_ value: JSONValue) {

@@ -19,6 +19,7 @@ const FALLBACK_WIRE: Record<string, readonly string[]> = {
   'session/prompt': ['request'],
   'session/cancel': ['request'],
   'session/follow': ['request'],
+  'session/page': ['request'],
   'session/control': [],
   'agentPresets/list': [],
   'agentPresets/select': ['agentId', 'agentPreset'],

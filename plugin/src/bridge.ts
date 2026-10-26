@@ -53,6 +53,12 @@ class Follow {
   readonly devices = new Set<string>()
   readonly controller = new AbortController()
   hasMore = false
+  /** Oldest log position held, the `beforeSeq` of the next older page. */
+  baseSeq: number | undefined
+  /** Newest log position seen, the `throughSeq` cut that older pages are read against. */
+  cursor = -1
+  /** The older page being read, shared by devices scrolling up at the same time. */
+  older: Promise<Json> | undefined
   ready: Promise<void>
   idleTimer: ReturnType<typeof setTimeout> | undefined
   liveTimer: ReturnType<typeof setTimeout> | undefined
@@ -495,6 +501,8 @@ export class Bridge {
       }
       case 'session.open':
         return await this.open(device, str(m.sessionId, 'sessionId'))
+      case 'session.older':
+        return await this.older(str(m.sessionId, 'sessionId'))
       case 'session.close':
         this.release(str(m.sessionId, 'sessionId'), device)
         this.opened.get(device)?.delete(m.sessionId as string)
@@ -690,6 +698,35 @@ export class Bridge {
     }
   }
 
+  /**
+   * Read the page of history before what the Session's follow holds, the way the desktop app does
+   * as its chat scrolls up: at least 50 messages and two Turn starts, capped at 500.
+   */
+  private older(sessionId: string): Promise<Json> {
+    const follow = this.follows.get(sessionId)
+    if (follow === undefined) throw new RemoteFailure('duo/not-open', 'Open the session first')
+    follow.older ??= (async () => {
+      if (!follow.hasMore || follow.baseSeq === undefined) return { items: [], hasMore: false }
+      const page = await this.remote.call<{ records?: unknown[]; hasMore?: boolean }>('session/page', {
+        address: { kind: 'session', sessionId },
+        throughSeq: follow.cursor,
+        beforeSeq: follow.baseSeq,
+        maxMessages: 500,
+        turnWindow: { minMessages: 50, minTurns: 2 },
+      })
+      const changed = new Set<string>()
+      for (const record of page.records ?? []) {
+        const event = obj(obj(record)?.event)
+        if (event === undefined) continue
+        if (typeof event.seq === 'number') follow.baseSeq = Math.min(follow.baseSeq ?? event.seq, event.seq)
+        for (const item of follow.transcript.apply(event as unknown as WireEvent)) changed.add(item.id)
+      }
+      follow.hasMore = page.hasMore === true
+      return { items: follow.transcript.ordered().filter(item => changed.has(item.id)), hasMore: follow.hasMore }
+    })().finally(() => { follow.older = undefined })
+    return follow.older
+  }
+
   private release(sessionId: string, device: string): void {
     const follow = this.follows.get(sessionId)
     if (follow === undefined) return
@@ -738,9 +775,16 @@ export class Bridge {
     switch (frame.type) {
       case 'snapshot': {
         follow.transcript.clear()
+        follow.baseSeq = undefined
+        follow.cursor = typeof frame.cursor === 'number' ? frame.cursor : -1
         for (const record of Array.isArray(frame.records) ? frame.records : []) {
           const event = obj(obj(record)?.event)
-          if (event !== undefined) follow.transcript.apply(event as unknown as WireEvent)
+          if (event === undefined) continue
+          if (typeof event.seq === 'number') {
+            follow.baseSeq ??= event.seq
+            follow.cursor = Math.max(follow.cursor, event.seq)
+          }
+          follow.transcript.apply(event as unknown as WireEvent)
         }
         follow.hasMore = frame.hasMore === true
         follow.live.end()
@@ -753,7 +797,7 @@ export class Bridge {
         if (first) {
           follow.resolve()
         } else {
-          this.toFollowers(follow, { ev: 'session.items', sessionId, items: follow.transcript.ordered(), replace: true })
+          this.toFollowers(follow, { ev: 'session.items', sessionId, items: follow.transcript.ordered(), replace: true, hasMore: follow.hasMore })
           this.toFollowers(follow, { ev: 'session.live', sessionId, live: follow.live.attempt ?? null })
         }
         return
@@ -761,6 +805,7 @@ export class Bridge {
       case 'event': {
         const event = obj(frame.event)
         if (event === undefined) return
+        if (typeof event.seq === 'number') follow.cursor = Math.max(follow.cursor, event.seq)
         const changed = follow.transcript.apply(event as unknown as WireEvent)
         if (changed.length > 0) this.toFollowers(follow, { ev: 'session.items', sessionId, items: changed })
         return

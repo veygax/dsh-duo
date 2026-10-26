@@ -29,7 +29,7 @@ or configure the row in your profile's `cordis.patch.yml`:
     relay: https://dsh-duo-relay.example.workers.dev
     hostName: Studio Mac        # name the phone shows (default: host name)
     holdQuestions: true          # keep DeepSeek's questions open for the phone
-    historyMessages: 200         # messages loaded when a session opens
+    historyMessages: 200         # messages sent when a session opens; older pages follow in the background
 ```
 
 Start dsh (the desktop app or `dsh web`) and open **iPhone** in the sidebar.

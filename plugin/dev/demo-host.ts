@@ -132,6 +132,16 @@ session('s-notes', 'Summarize the RFC', '/Users/dev/Documents', 1440, 'minimal',
   ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
 ])
 
+// Longer than one follow window, so the phone has to page back to its first message.
+for (const [id, title] of [['s-long', 'Long refactor'], ['s-long-2', 'Long migration']] as const) {
+  session(id, title, '/Users/dev/Code/webapp', 2880, 'standard', Array.from({ length: 120 }, (_, i) => [
+    ev('turn/start', { turn: i + 1 }),
+    user(i === 0 ? 'First message: start the refactor' : `Step ${i + 1}: keep going`),
+    assistant(i + 1, [{ type: 'text', text: `Done with step ${i + 1}.` }]),
+    ev('turn/end', { turn: i + 1, reason: { kind: 'completed' } }),
+  ]).flat())
+}
+
 const workspaces = [
   { workspaceId: 'w-web', path: '/Users/dev/Code/webapp', title: 'webapp', sessionIds: ['s-login', 's-api'] },
   { workspaceId: 'w-plugins', path: '/Users/dev/Code/dsh-plugins', title: 'dsh-plugins', sessionIds: ['s-plugin'] },
@@ -323,6 +333,14 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
       return { workspace, created: true }
     }
     case 'userQuestions/answer': return true
+    case 'session/page': {
+      await sleep(300) // a relay round trip
+      // Event counts stand in for dsh's message-aligned, Turn-aligned pages.
+      const entry = sessions.get(String((req.address as Json).sessionId))!
+      const before = entry.events.filter(event => (event.seq as number) < Number(req.beforeSeq ?? Infinity))
+      const page = before.slice(-Number(req.maxMessages ?? 500)).slice(-60)
+      return { records: page.map(event => ({ type: 'event', event })), hasMore: page.length < before.length }
+    }
     default: throw Object.assign(new Error(`demo host does not implement ${endpoint}`), { code: 'demo/unimplemented' })
   }
 }
@@ -337,7 +355,9 @@ const ctx: HostContext = {
       if (endpoint === 'session/follow') {
         const address = (request.args.request as Json).address as Json
         const entry = sessions.get(String(address.sessionId))!
-        feed.push({ type: 'snapshot', header: {}, cursor: seq, records: entry.events.map(event => ({ type: 'event', event })), hasMore: false, projections: { asOfSeq: seq, values: {} } })
+        const max = Number((request.args.request as Json).maxMessages ?? Infinity)
+        const window = entry.events.slice(-max)
+        feed.push({ type: 'snapshot', header: {}, cursor: seq, records: window.map(event => ({ type: 'event', event })), hasMore: window.length < entry.events.length, projections: { asOfSeq: seq, values: {} } })
         entry.feeds.add(feed)
         request.signal?.addEventListener('abort', () => entry.feeds.delete(feed))
       } else if (endpoint === 'session/control') {
