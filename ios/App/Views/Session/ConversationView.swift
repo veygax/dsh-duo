@@ -32,43 +32,23 @@ struct ConversationView: View {
     }
 }
 
+/// A native List, not a lazy stack: it keeps its scroll position and momentum through folding,
+/// the sidebar and the inspector, and never shows unmeasured (blank) rows after a resize.
 struct TranscriptView: View {
     @Environment(HostStore.self) private var store
     @Environment(\.paneOpen) private var paneOpen
-    /// Horizontal offset that glides the text column to its new place when the inspector opens or
-    /// closes, so the chat is pushed aside rather than jumping.
-    @State private var glide: CGFloat = 0
-    @State private var glidePending = false
-    @Environment(\.layoutEpoch) private var layoutEpoch
     let model: SessionModel
     let session: SessionInfo?
-    /// The lazy stack can keep a scroll offset into rows it has not measured at the new width,
-    /// showing an empty transcript. After the window resizes, rebuild it, anchored at the end.
-    @State private var generation = 0
-    /// The first row on screen. Observed, not bound: a bound scroll position pins that row while the
-    /// width changes and fights the bottom anchor, leaving the transcript scrolled past its end.
-    @State private var topId: String?
-    /// Where the user left off. Only their own scrolling updates it, so a resize, a rebuild or a
-    /// reconnect can't move it; a rebuild puts them back here. Not observed, so it never re-renders.
-    @State private var reading = Reading()
+    /// The end of the conversation is on screen. New output, and width changes that rewrap it,
+    /// keep it there; once the user scrolls up, nothing moves them.
+    @State private var following = true
 
     private static let end = "transcript-end"
 
-    /// Where the text starts in a transcript this wide: a centred column of at most 780 points
-    /// with 16 points either side.
-    private static func textLeft(in width: CGFloat) -> CGFloat {
-        (width - min(812, width)) / 2 + 16
-    }
-
-    private final class Reading {
-        var atBottom = true
-        var topId: String?
-    }
-
     var body: some View {
         ScrollViewReader { proxy in
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+        List {
+            Group {
                 if model.loading {
                     ProgressView("Loading conversation…")
                         .frame(maxWidth: .infinity)
@@ -101,50 +81,42 @@ struct TranscriptView: View {
                         .id("working")
                 }
 
-                Color.clear.frame(height: 0).id(Self.end)
+                Color.clear.frame(height: 1).id(Self.end)
             }
-            .scrollTargetLayout()
-            .frame(maxWidth: 780)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            // A reading column of at most 780 points, centred on wide screens.
+            .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity)
-            .offset(x: glide)
+            .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
+        .listStyle(.plain)
+        // Rows size to their content; the default 44-point minimum pads out dividers and the end marker.
+        .environment(\.defaultMinListRowHeight, 0)
+        .scrollContentBackground(.hidden)
+        // Buttons inside a row act on their own rather than making the whole row one button.
+        .buttonStyle(.borderless)
+        .contentMargins(.vertical, 5, for: .scrollContent)
         // Rows take their new width in one step when the inspector opens or closes; animated, each box
         // would morph between widths while its text has already rewrapped.
         .transaction(value: paneOpen) { $0.animation = nil }
-        .id(generation)
-        .onScrollTargetVisibilityChange(idType: String.self) { topId = $0.first }
-        .defaultScrollAnchor(.bottom)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
-        .onScrollPhaseChange { old, new, context in
-            guard new == .idle, old != .idle else { return }
-            let geometry = context.geometry
-            reading.atBottom = geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 40
-            reading.topId = topId
-        }
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: paneOpen) {
-            glidePending = true
-            Task {
-                try? await Task.sleep(for: .seconds(1))
-                glidePending = false
-            }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.visibleRect.maxY >= geometry.contentSize.height + geometry.contentInsets.bottom - 40
+        } action: { _, atEnd in
+            following = atEnd
         }
-        .onGeometryChange(for: CGFloat.self, of: \.size.width) { old, new in
-            guard glidePending, old > 0, old != new else { return }
-            glidePending = false
-            glide = Self.textLeft(in: old) - Self.textLeft(in: new)
-            Task { withAnimation(.smooth(duration: 0.35)) { glide = 0 } }
-            // Rewrapping changes the transcript's height; keep the end in view if that's where the user was.
-            if reading.atBottom { Task { proxy.scrollTo(Self.end, anchor: .bottom) } }
+        .onChange(of: model.loading, initial: true) { if !model.loading { stickToEnd(proxy, force: true) } }
+        .onChange(of: model.items.count) { stickToEnd(proxy) }
+        .onChange(of: model.live?.text.count ?? 0) { stickToEnd(proxy) }
+        .onChange(of: model.live?.thinking.count ?? 0) { stickToEnd(proxy) }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { _, _ in stickToEnd(proxy) }
         }
-        .onChange(of: layoutEpoch) {
-            generation += 1
-            guard !reading.atBottom, let id = reading.topId else { return }
-            Task { proxy.scrollTo(id, anchor: .top) }
-        }
-        }
+    }
+
+    private func stickToEnd(_ proxy: ScrollViewProxy, force: Bool = false) {
+        guard force || following else { return }
+        Task { proxy.scrollTo(Self.end, anchor: .bottom) }
     }
 }
 

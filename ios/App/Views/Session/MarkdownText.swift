@@ -210,6 +210,8 @@ struct TableBlock: View {
             .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary) }
             .clipShape(.rect(cornerRadius: 10))
         }
+        // As tall as the table; a list cell would otherwise propose too little.
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Table")
     }
@@ -255,10 +257,15 @@ struct CodeBlock: View {
                 Text(code)
                     .font(.footnote.monospaced())
                     .textSelection(.enabled)
+                    // Long lines scroll sideways rather than truncating, wherever the block is placed.
+                    .fixedSize()
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
             }
-            .frame(maxHeight: 360)
+            // As tall as the code (a list cell would otherwise propose too little), up to 360 points.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: 360, alignment: .top)
+            .clipped()
         }
         .background(.fill.tertiary, in: .rect(cornerRadius: 12))
     }
