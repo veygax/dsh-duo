@@ -5,7 +5,7 @@ struct ComposerView: View {
     @Environment(HostStore.self) private var store
     @Bindable var model: SessionModel
     let sessionId: String
-    @FocusState private var focused: Bool
+    var focused: FocusState<Bool>.Binding
     @State private var showCommands = false
     @Namespace private var glass
 
@@ -39,18 +39,17 @@ struct ComposerView: View {
                         Haptics.selection()
                         model.draft = "/\(command.name) "
                         showCommands = false
-                        focused = true
+                        focused.wrappedValue = true
                     }
                     .glassEffectID("commands", in: glass)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     TextField(running ? "Add to the queue or steer…" : "Message DeepSeek", text: $model.draft, axis: .vertical)
                         .lineLimit(1...8)
-                        .focused($focused)
+                        .focused(focused)
                         .textInputAutocapitalization(.sentences)
-                        .onKeyPress(.return, phases: .down) { press in
-                            guard press.modifiers.contains(.command) else { return .ignored }
-                            send(steer: false)
+                        .onKeyPress(.escape) {
+                            focused.wrappedValue = false
                             return .handled
                         }
                         .accessibilityLabel("Message")
@@ -64,7 +63,7 @@ struct ComposerView: View {
                                 if showCommands && model.draft.isEmpty { model.draft = "/" }
                                 if !showCommands && model.draft == "/" { model.draft = "" }
                             }
-                            focused = true
+                            focused.wrappedValue = true
                             if model.commands.isEmpty { Task { await store.loadCommands(for: model) } }
                         })
                         .labelStyle(.iconOnly)
@@ -77,6 +76,9 @@ struct ComposerView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
+                // The whole card is the field's target, not just its first line; the menus and buttons keep their taps.
+                .contentShape(.rect)
+                .onTapGesture { focused.wrappedValue = true }
                 // Concentric with the display corners it sits beside.
                 .glassEffect(.regular, in: .rect(corners: .concentric(minimum: 24), isUniform: true))
                 .glassEffectID("composer", in: glass)
@@ -108,6 +110,8 @@ struct ComposerView: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.circle)
                 .disabled(!canSend)
+                // A real shortcut, so it appears in the hardware keyboard's ⌘ overlay.
+                .keyboardShortcut(.return, modifiers: .command)
                 .overlay { if model.sending { ProgressView().controlSize(.small) } }
                 .contextMenu {
                     if running {

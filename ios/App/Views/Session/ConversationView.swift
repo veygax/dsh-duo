@@ -10,9 +10,13 @@ struct ConversationView: View {
     @Environment(HostStore.self) private var store
     let model: SessionModel
     let sessionId: String
+    /// Owned here, not by the composer, so a tap anywhere in the transcript can put the keyboard away.
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         TranscriptView(model: model, session: store.sessions[sessionId])
+            // Simultaneous, so taps still reach the row underneath (a thought, a tool call, a link).
+            .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
             // A bar, not a plain inset: content scrolling beneath it gets the system scroll edge effect.
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 // One container renders the question cards, command list and composer together
@@ -22,7 +26,7 @@ struct ConversationView: View {
                         ForEach(store.questions(for: sessionId)) { question in
                             QuestionCard(pending: question)
                         }
-                        ComposerView(model: model, sessionId: sessionId)
+                        ComposerView(model: model, sessionId: sessionId, focused: $composerFocused)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -64,8 +68,6 @@ struct TranscriptView: View {
                             Task { await store.open(model) }
                         })
                     }
-                } else if model.items.isEmpty && model.live == nil {
-                    EmptySessionHint(session: session, model: model)
                 }
 
                 ForEach(model.items) { item in
@@ -117,53 +119,6 @@ struct TranscriptView: View {
     private func stickToEnd(_ proxy: ScrollViewProxy, force: Bool = false) {
         guard force || following else { return }
         Task { proxy.scrollTo(Self.end, anchor: .bottom) }
-    }
-}
-
-/// First-run guidance inside a blank Session.
-private struct EmptySessionHint: View {
-    @Environment(HostStore.self) private var store
-    let session: SessionInfo?
-    let model: SessionModel
-
-    private let suggestions = [
-        "Explain how this project is structured",
-        "Find and fix failing tests",
-        "Review my uncommitted changes",
-    ]
-
-    var body: some View {
-        let mode = store.mode(of: session)
-        VStack(alignment: .leading, spacing: 16) {
-            Label(mode.name, systemImage: mode.symbol)
-                .font(.title2.bold())
-            Text(mode.summary)
-                .foregroundStyle(.secondary)
-            if let cwd = session?.cwd {
-                Label(cwd, systemImage: "folder")
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.head)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(suggestions, id: \.self) { suggestion in
-                    Button(action: tap { model.draft = suggestion }) {
-                        Text(suggestion)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.roundedRectangle)
-                    .controlSize(.large)
-                    .tint(.secondary)
-                    .foregroundStyle(.primary)
-                }
-            }
-            Text("Type / to see commands and skills.")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.top, 40)
     }
 }
 
