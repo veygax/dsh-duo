@@ -254,6 +254,8 @@ export class Bridge {
     on('api-session/status', (sessionId: string, running: boolean) => {
       if (this.directory.status(sessionId, running)) void this.turnFinished(sessionId)
     })
+    // Auto review comes and goes with its integration; phones reload the list.
+    on('permission-presets/catalog-changed', () => this.broadcast({ ev: 'permissions.changed' }))
     on('api-session/error', (sessionId: string, message: string) => {
       const follow = this.follows.get(sessionId)
       if (follow === undefined) return
@@ -617,6 +619,10 @@ export class Bridge {
         return null
       case 'models.catalog':
         return await this.catalog()
+      case 'permissions.catalog':
+        return await this.permissionCatalog()
+      case 'permission.set':
+        return await this.setPermission(str(m.sessionId, 'sessionId'), str(m.preset, 'preset'))
       case 'presets.list':
         return await this.presets()
       case 'commands.list':
@@ -783,6 +789,29 @@ export class Bridge {
         }),
       })),
     }
+  }
+
+  /** The permission presets a Session can switch between, as the desktop's picker lists them. */
+  private async permissionCatalog() {
+    const catalog = await this.remote.call<{ options?: Json[]; defaultPreset?: string }>('permissionPresets/catalog')
+    return {
+      presets: (catalog.options ?? []).flatMap(option => typeof option.value !== 'string' ? [] : [{
+        id: option.value,
+        name: typeof option.name === 'string' ? option.name : option.value,
+        ...typeof option.description === 'string' ? { description: option.description } : {},
+      }]),
+      ...typeof catalog.defaultPreset === 'string' ? { defaultPreset: catalog.defaultPreset } : {},
+    }
+  }
+
+  /** Switch a Session's preset the way the desktop does: its `/permission` command. */
+  private async setPermission(sessionId: string, preset: string) {
+    if (!/^[\w-]+$/.test(preset)) throw new RemoteFailure('duo/bad-request', 'preset must be a preset name')
+    const execution = await this.remote.call<{ result?: { kind: string; text?: string } } | undefined>(
+      'commands/execute', sessionId, `/permission ${preset}`, [])
+    if (execution === undefined || execution === null) throw new RemoteFailure('duo/unsupported', 'This Mac offers no permission presets')
+    if (execution.result?.kind === 'error') throw new RemoteFailure('duo/permission-failed', execution.result.text ?? 'Could not switch permission')
+    return { preset }
   }
 
   private async presets() {

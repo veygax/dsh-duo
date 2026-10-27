@@ -36,6 +36,8 @@ export interface SessionView {
   workspaceId?: string
   preset?: string
   model?: ModelRef
+  /** The permission preset in effect (`workspace-write`, `danger-full-access`, `auto`, or `custom`). */
+  permission?: string
   questions: number
   parentId?: string
 }
@@ -331,6 +333,7 @@ export class Directory {
     const cwd = typeof summary.cwd === 'string' ? summary.cwd
       : typeof values.workingDirectory === 'string' ? values.workingDirectory : undefined
     const model = modelOf(values.modelSelection)
+    const permission = obj(values.permissions)?.currentValue
     const blank = summary.blank === true
     return {
       id: sessionId,
@@ -342,6 +345,7 @@ export class Directory {
       ...this.workspaceOf.has(sessionId) ? { workspaceId: this.workspaceOf.get(sessionId)! } : {},
       ...typeof values.agentPreset === 'string' ? { preset: values.agentPreset } : {},
       ...model === undefined ? {} : { model },
+      ...typeof permission === 'string' && permission !== '' ? { permission } : {},
       questions: questionsOf(values.userQuestions).length,
       ...typeof summary.parentSessionId === 'string' ? { parentId: summary.parentSessionId } : {},
     }

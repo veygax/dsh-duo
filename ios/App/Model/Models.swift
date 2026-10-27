@@ -16,6 +16,8 @@ nonisolated struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
     var workspaceId: String?
     var preset: String?
     var model: ModelRef?
+    /// The permission preset in effect, when the Mac has presets.
+    var permission: String?
     var questions: Int
     var parentId: String?
 
@@ -25,6 +27,39 @@ nonisolated struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
     var folderName: String? {
         cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
     }
+}
+
+/// How much DeepSeek may do on its own: a sandbox and an approval policy, switched together.
+nonisolated struct PermissionPreset: Codable, Identifiable, Hashable, Sendable {
+    var id: String
+    var name: String
+    var description: String?
+
+    static let fullAccess = "danger-full-access"
+    static let auto = "auto"
+
+    var title: String {
+        switch id {
+        case "workspace-write": "Workspace Write"
+        case Self.fullAccess: "Full Access"
+        case Self.auto: "Auto Review"
+        case "custom": "Custom"
+        default: name.split(separator: "-").map(\.capitalized).joined(separator: " ")
+        }
+    }
+
+    var symbol: String {
+        switch id {
+        case "workspace-write": "lock.shield"
+        case Self.fullAccess: "exclamationmark.shield"
+        case Self.auto: "checkmark.shield"
+        case "custom": "slider.horizontal.3"
+        default: "shield"
+        }
+    }
+
+    /// Wider than the workspace: asked for with a confirmation, and marked in color while on.
+    var widens: Bool { id == Self.fullAccess || id == Self.auto }
 }
 
 nonisolated struct Workspace: Codable, Identifiable, Hashable, Sendable {

@@ -63,6 +63,7 @@ struct ComposerView: View {
                     HStack(spacing: 8) {
                         ModeMenu(sessionId: sessionId)
                         ModelMenu(sessionId: sessionId)
+                        PermissionMenu(sessionId: sessionId)
                         Button("Commands", systemImage: "slash.circle", action: tap {
                             withAnimation(.snappy) {
                                 showCommands.toggle()

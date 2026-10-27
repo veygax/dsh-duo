@@ -57,6 +57,94 @@ struct ModeMenu: View {
     }
 }
 
+/// What DeepSeek may do without asking. Open, a labelled chip beside Mode and Model; folded there is no
+/// room, so the same menu sits behind its shield. Widening access asks first, as the desktop does.
+struct PermissionMenu: View {
+    @Environment(HostStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    let sessionId: String
+    @State private var confirming: PermissionPreset?
+
+    var body: some View {
+        if let id = store.sessions[sessionId]?.permission {
+            let current = store.permissionPresets.first { $0.id == id } ?? PermissionPreset(id: id, name: id)
+            let tint: Color = id == PermissionPreset.fullAccess ? .orange : id == PermissionPreset.auto ? .purple : .accentColor
+            Group {
+                if sizeClass == .compact {
+                    menu(current)
+                        .labelStyle(.iconOnly)
+                        .font(.title3)
+                        .buttonStyle(.borderless)
+                        .menuIndicator(.hidden)
+                } else {
+                    menu(current)
+                        .font(.footnote.weight(.medium))
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                }
+            }
+            .tint(tint)
+            .menuStyle(.button)
+            .menuOrder(.fixed)
+            .accessibilityLabel("Permission: \(current.title)")
+            .onAppear { if store.permissionPresets.isEmpty { Task { await store.loadPermissions() } } }
+            .confirmationDialog(confirming.map(confirmTitle) ?? "", isPresented: .init(
+                get: { confirming != nil }, set: { if !$0 { confirming = nil } }
+            ), titleVisibility: .visible, presenting: confirming) { preset in
+                Button(preset.id == PermissionPreset.auto ? "Turn On Auto Review" : "Allow Full Access") {
+                    Haptics.press()
+                    Task { await store.setPermission(preset, for: sessionId) }
+                }
+                Button("Cancel", role: .cancel) { Haptics.tap() }
+            } message: { preset in
+                Text(confirmMessage(preset))
+            }
+        }
+    }
+
+    private func menu(_ current: PermissionPreset) -> some View {
+        Menu {
+            Section("Permission") {
+                ForEach(store.permissionPresets) { preset in
+                    Button {
+                        Haptics.selection()
+                        guard preset.id != current.id else { return }
+                        if preset.widens {
+                            confirming = preset
+                        } else {
+                            Task { await store.setPermission(preset, for: sessionId) }
+                        }
+                    } label: {
+                        Label(preset.title, systemImage: preset.id == current.id ? "checkmark" : preset.symbol)
+                    }
+                }
+            }
+            if store.permissionPresets.isEmpty {
+                Button("Load Permissions", systemImage: "arrow.clockwise") {
+                    Haptics.tap()
+                    Task { await store.loadPermissions() }
+                }
+            }
+        } label: {
+            Label(current.title, systemImage: current.symbol)
+                .lineLimit(1)
+                .contentTransition(.symbolEffect(.replace))
+        }
+    }
+
+    private func confirmTitle(_ preset: PermissionPreset) -> String {
+        preset.id == PermissionPreset.auto ? "Turn on Auto Review?" : "Give DeepSeek full access?"
+    }
+
+    private func confirmMessage(_ preset: PermissionPreset) -> String {
+        if preset.id == PermissionPreset.auto {
+            return "DeepSeek runs outside the sandbox, and the model reviews every step before it runs. You're asked about the steps it turns down. Experimental, and it uses extra tokens."
+        }
+        return "DeepSeek can change any file and run commands on \(store.hostName) without asking first, including sensitive ones. Use it only for work you trust."
+    }
+}
+
 /// Model for the Session's next turn; its thinking level is set beside Send.
 struct ModelMenu: View {
     @Environment(HostStore.self) private var store

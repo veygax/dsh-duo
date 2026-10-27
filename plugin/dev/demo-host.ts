@@ -63,6 +63,7 @@ interface DemoSession {
   feeds: Set<Feed<Json>>
   model: Json
   preset: string
+  permission: string
   title: string
   turn: number
   /** Prompts sent with mode "queue" during a turn; each runs as its own turn afterwards. */
@@ -78,6 +79,7 @@ function session(id: string, title: string, cwd: string, minutesAgo: number, pre
     events,
     feeds: new Set(),
     model: { provider: 'deepseek', model: 'deepseek-v4', reasoningEffort: 'high' },
+    permission: 'workspace-write',
     preset,
     title,
     turn: 1,
@@ -161,7 +163,8 @@ const controlFeeds = new Set<Feed<Json>>()
 
 function values(id: string): Json {
   const entry = sessions.get(id)!
-  return { title: entry.title, agentPreset: entry.preset, modelSelection: { next: entry.model, lastUsed: entry.model }, workingDirectory: entry.summary.cwd }
+  return { title: entry.title, agentPreset: entry.preset, modelSelection: { next: entry.model, lastUsed: entry.model }, workingDirectory: entry.summary.cwd,
+    permissions: { currentValue: entry.permission } }
 }
 function summaryOf(id: string): Json {
   return { ...sessions.get(id)!.summary, projections: { kind: 'sequenced', asOfSeq: seq, values: values(id) } }
@@ -273,6 +276,14 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
       { id: 'minimal', name: 'Minimal' }, { id: 'cordis', name: 'Creator' },
     ] }
     case 'session/modelCatalog': return catalog
+    case 'permissionPresets/catalog': return {
+      options: [
+        { value: 'workspace-write', name: 'workspace-write', description: 'Write inside the workspace and permitted temporary directories; wider retries require approval.' },
+        { value: 'danger-full-access', name: 'danger-full-access', description: 'Full file access without approval prompts.' },
+        { value: 'auto', name: 'auto', description: 'Each tool call is reviewed by the model before it runs.' },
+      ],
+      defaultPreset: 'workspace-write',
+    }
     case 'session/selectModel': {
       const entry = sessions.get(String(req.sessionId))!
       entry.model = { provider: req.provider, model: req.model, ...req.reasoningEffort === undefined ? {} : { reasoningEffort: req.reasoningEffort } }
@@ -330,6 +341,13 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
     ] }
     case 'commands/execute': {
       const line = String(request.args.line)
+      const permission = /^\/permission (\S+)$/.exec(line)?.[1]
+      if (permission !== undefined) {
+        const entry = sessions.get(String(request.args.agentId))!
+        entry.permission = permission
+        projection(entry.summary.sessionId as string, 'permissions', { currentValue: permission })
+        return { commandId: `k${seq}`, result: { kind: 'success', text: `preset ${permission}` } }
+      }
       if (!line.startsWith('/compact') && !line.startsWith('/clear') && !line.startsWith('/goal')) return undefined
       const id = String(request.args.agentId)
       append(id, ev('command/run', { commandId: `k${seq}`, name: line.slice(1).split(' ')[0], source: 'user' }, Date.now()))

@@ -27,6 +27,7 @@ final class HostStore {
     private(set) var workspaces: [Workspace] = []
     private(set) var presets: [Preset] = []
     private(set) var catalog = ModelCatalog(groups: [], defaultModel: nil)
+    private(set) var permissionPresets: [PermissionPreset] = []
     private(set) var questions: [String: PendingQuestion] = [:]
     private(set) var loadedOnce = false
     private var models: [String: SessionModel] = [:]
@@ -117,6 +118,7 @@ final class HostStore {
             Task {
                 await hello()
                 await registerPush()
+                await loadPermissions()
             }
         case .failed(let message): connection = .failed(message)
         }
@@ -184,6 +186,8 @@ final class HostStore {
         switch event["ev"]?.string {
         case "sessions.upsert":
             if let session = try? event["session"]?.decode(SessionInfo.self) { sessions[session.id] = session }
+        case "permissions.changed":
+            Task { await loadPermissions() }
         case "sessions.remove":
             if let id = event["sessionId"]?.string { sessions[id] = nil }
         case "workspaces.changed":
@@ -409,6 +413,24 @@ final class HostStore {
             let selected = try await client.decode("session.model", params, as: ModelRef.self)
             sessions[sessionId]?.model = selected
         } catch { show(error) }
+    }
+
+    func loadPermissions() async {
+        guard let client, let value = try? await client.request("permissions.catalog") else { return }
+        permissionPresets = (try? value["presets"]?.decode([PermissionPreset].self)) ?? []
+    }
+
+    /// Switch what DeepSeek may do in a Session. Shown at once; put back if the Mac refuses.
+    func setPermission(_ preset: PermissionPreset, for sessionId: String) async {
+        guard let client else { return }
+        let previous = sessions[sessionId]?.permission
+        sessions[sessionId]?.permission = preset.id
+        do {
+            _ = try await client.request("permission.set", ["sessionId": sessionId, "preset": preset.id])
+        } catch {
+            sessions[sessionId]?.permission = previous
+            show(error)
+        }
     }
 
     /// Switch mode. dsh fixes a Session's mode at its first turn, so a started Session gets a fresh sibling instead.

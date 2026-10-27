@@ -29,6 +29,7 @@ const FALLBACK_WIRE: Record<string, readonly string[]> = {
   'workspace/create': ['request'],
   'workspace/follow': [],
   'directoryPicker/list': ['path'],
+  'permissionPresets/catalog': [],
   'userQuestions/answer': ['agentId', 'callId', 'answer'],
 }
 
