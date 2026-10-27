@@ -23,6 +23,8 @@ final class SessionModel: Identifiable {
     private(set) var pending: [PendingMessage] = []
     /// A row picked from search, for the transcript to scroll to and mark.
     var reveal: Reveal?
+    /// A tap on the toolbar's jump to the top or the end, for the transcript to glide to.
+    var jump: Jump?
     let search = TranscriptSearch()
 
     init(id: String) {
@@ -117,6 +119,12 @@ final class SessionModel: Identifiable {
 struct Reveal: Equatable {
     let itemId: String
     /// Picking the same row twice scrolls to it again.
+    let token = UUID()
+}
+
+struct Jump: Equatable {
+    let toEnd: Bool
+    /// Every tap is its own request, so rapid taps each redirect the glide.
     let token = UUID()
 }
 

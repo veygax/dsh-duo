@@ -161,6 +161,10 @@ struct TranscriptView: View {
             try? await Task.sleep(for: .seconds(1.6))
             withAnimation(.smooth(duration: 0.8)) { marked = nil }
         }
+        .onChange(of: model.jump?.token) {
+            guard placed, let jump = model.jump else { return }
+            placeKeeper.jump(toEnd: jump.toEnd)
+        }
         }
     }
 
@@ -191,7 +195,7 @@ struct TranscriptView: View {
 /// layout pass and before anything is drawn. Other size changes, such as rows sizing as they scroll
 /// into view, are the List's own business.
 @MainActor
-final class PlaceKeeper {
+final class PlaceKeeper: NSObject {
     private weak var collectionView: UICollectionView?
     private weak var model: SessionModel?
     private var observations: [NSKeyValueObservation] = []
@@ -213,6 +217,11 @@ final class PlaceKeeper {
     /// them until the reader touches the screen; anything else is left to the List and the reader.
     private var settling = false
     private var correcting = false
+    /// A jump to the top or the end in flight: where it is headed and how fast the offset is moving.
+    /// Another tap only changes the target, so the motion carries its speed into the new direction.
+    private var jumpLink: CADisplayLink?
+    private var jumpToEnd = false
+    private var jumpVelocity: CGFloat = 0
 
     func expect(lead: Int, rows: Int) {
         self.lead = lead
@@ -256,7 +265,48 @@ final class PlaceKeeper {
         anchorOffset = offset
     }
 
+    /// Glide to the top or the end. The end is chased as it moves (rows settling, output streaming in).
+    func jump(toEnd: Bool) {
+        guard let collectionView else { return }
+        jumpToEnd = toEnd
+        settling = false
+        guard jumpLink == nil else { return }
+        collectionView.setContentOffset(collectionView.contentOffset, animated: false)
+        jumpVelocity = 0
+        let link = CADisplayLink(target: self, selector: #selector(stepJump))
+        link.add(to: .main, forMode: .common)
+        jumpLink = link
+    }
+
+    @objc private func stepJump(_ link: CADisplayLink) {
+        guard let collectionView, !collectionView.isTracking else { return endJump() }
+        let target = jumpToEnd ? endOffset(collectionView) : -collectionView.adjustedContentInset.top
+        let dt = min(link.targetTimestamp - link.timestamp, 1 / 30)
+        // A critically damped spring: it arrives in about the same time from any distance, never overshoots,
+        // and keeps its velocity when the target flips.
+        let stiffness: CGFloat = 11
+        let offset = collectionView.contentOffset.y
+        jumpVelocity += (-2 * stiffness * jumpVelocity - stiffness * stiffness * (offset - target)) * dt
+        let next = offset + jumpVelocity * dt
+        if abs(next - target) < 0.5 && abs(jumpVelocity) < 20 {
+            collectionView.contentOffset.y = target
+            return endJump()
+        }
+        collectionView.contentOffset.y = next
+    }
+
+    private func endJump() {
+        jumpLink?.invalidate()
+        jumpLink = nil
+        jumpVelocity = 0
+    }
+
     private func restoreAnchor() {
+        // A jump moves the offset itself every frame; correcting under it would fight it.
+        if jumpLink != nil {
+            firstId = model?.items.first?.id
+            return
+        }
         guard inSync, let collectionView, let items = model?.items, let anchorId else { return noteAnchor() }
         let prepended = items.first?.id != firstId
         guard prepended || (settling && !collectionView.isTracking && !collectionView.isDecelerating) else {

@@ -197,6 +197,17 @@ struct SessionView: View {
             .keyboardShortcut("f", modifiers: .command)
             .tint(.primary)
         }
+
+        // One glass group under search: top and end belong together.
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button("Jump to Top", systemImage: "chevron.up", action: tap { model?.jump = Jump(toEnd: false) })
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .tint(.primary)
+            Button("Jump to End", systemImage: "chevron.down", action: tap { model?.jump = Jump(toEnd: true) })
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .tint(.primary)
+        }
     }
 
     private var typing: Bool { searching && !query.trimmingCharacters(in: .whitespaces).isEmpty }
