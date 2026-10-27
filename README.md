@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.jpg" alt="DSH Duo on an unfolded and a folded iPhone Duo">
+</p>
+
 # DSH Duo
 
 A native SwiftUI remote for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`), designed for
@@ -57,6 +61,12 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
   questions.
 
 ### iPhone Duo specifics
+
+<p align="center">
+  <img src="docs/images/unfolded-session.png" width="49%" alt="Unfolded: the session list beside the open session">
+  <img src="docs/images/unfolded-question.png" width="49%" alt="Unfolded: a question card with its options laid out across the inner display">
+</p>
+<p align="center"><sub>Unfolded, the sidebar sits beside the open session and question options spread across the inner display.</sub></p>
 
 - Standard toolbars throughout, so the system places controls on the vertical side axis. Items use `Label` (title +
   symbol), `ToolbarItemGroup`, `.visibilityPriority(.high)` for primary actions, and `ToolbarOverflowMenu` instead of a
