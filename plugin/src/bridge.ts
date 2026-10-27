@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { open as openFile, readdir } from 'node:fs/promises'
+import { open as openFile, readdir, stat } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
@@ -482,7 +482,7 @@ export class Bridge {
         }
       }
       case 'fs.list': {
-        const listing = await this.remote.call<Json>('directoryPicker/list', typeof m.path === 'string' ? m.path : undefined)
+        const listing = await this.listDirectories(typeof m.path === 'string' ? m.path : undefined)
         const crumbs = Array.isArray(listing.crumbs) ? listing.crumbs as Json[] : []
         const entries = Array.isArray(listing.entries) ? listing.entries as Json[]
           : Array.isArray(listing.children) ? listing.children as Json[] : []
@@ -593,6 +593,38 @@ export class Bridge {
     } finally {
       await handle.close()
     }
+  }
+
+  /**
+   * One level of folders for the phone's folder browser. The desktop app composes the native chooser
+   * behind `directoryPicker`, which refuses `list` with `directory-picker/unavailable`; the plugin runs
+   * on the Host, so it then lists the folder itself in the browse backend's shape.
+   */
+  private async listDirectories(path: string | undefined): Promise<Json> {
+    try {
+      return await this.remote.call<Json>('directoryPicker/list', path)
+    } catch (error) {
+      if (!(error instanceof RemoteFailure) || error.code !== 'directory-picker/unavailable') throw error
+    }
+    const home = homedir()
+    if (path !== undefined && !isAbsolute(path)) throw new RemoteFailure('directory-picker/unreadable', `cannot list "${path}": not an absolute path`)
+    const target = resolve(path ?? home)
+    const dirents = await readdir(target, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      throw new RemoteFailure('directory-picker/unreadable', `cannot list ${target}: ${error.code ?? error.message}`)
+    })
+    const entries: Json[] = []
+    for (const dirent of dirents.sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = join(target, dirent.name)
+      const folder = dirent.isDirectory() || dirent.isSymbolicLink() && await stat(full).then(s => s.isDirectory(), () => false)
+      if (folder) entries.push({ name: dirent.name, path: full, hidden: dirent.name.startsWith('.') })
+      if (entries.length === MAX_FOLDER_ENTRIES) break
+    }
+    const crumbs: Json[] = []
+    for (let current = target; ; current = dirname(current)) {
+      crumbs.unshift({ name: basename(current) || current, path: current })
+      if (dirname(current) === current) break
+    }
+    return { path: target, home, crumbs, entries }
   }
 
   /** A linked folder's files and subfolders, folders first, for the phone to pick one to preview. */
