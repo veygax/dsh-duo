@@ -5,7 +5,8 @@
  *   node dev/demo-host.ts --relay http://127.0.0.1:8787
  *
  * Prompts stream back thinking, a tool call and a reply; a prompt containing
- * "ask" makes DeepSeek ask a question; "permission" makes its tool call ask for approval;
+ * "ask" makes DeepSeek ask a question ("ask several": two, one multi-select); "permission" makes its
+ * tool call ask for approval;
  * `/compact` runs a command.
  */
 
@@ -227,7 +228,9 @@ async function runTurn(id: string, prompt: string): Promise<void> {
         { label: 'Open PR', description: 'Push a branch and open a draft PR' },
         { label: 'Commit only', description: 'Commit locally, no push' },
         { label: 'Not yet' },
-      ] }],
+      ] }, ...(/\bseveral\b/i.test(prompt) ? [{ id: 'q2', header: 'Checks', question: 'Which checks should run first?', multiSelect: true, options: [
+        { label: 'Unit tests' }, { label: 'Lint', description: 'ESLint and Prettier' }, { label: 'E2E', description: 'Playwright, about 4 minutes' },
+      ] }] : [])],
       agent: { id, session: { id } },
       wait: { callId: `ask-${seq}` },
     }, () => Promise.reject(new Error('no web client'))) as { answers: Array<{ selected: string[]; custom?: string }> }

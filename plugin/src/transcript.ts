@@ -227,10 +227,16 @@ export class Transcript {
 
   /** The most recent assistant reply, for notifications. */
   lastReply(): string | undefined {
+    const item = this.lastReplyItem()
+    return item?.kind === 'text' ? item.text : undefined
+  }
+
+  /** The final reply of the latest Turn, which a notification about it opens to. */
+  lastReplyItem(): Item | undefined {
     const items = this.ordered()
     for (let index = items.length - 1; index >= 0; index--) {
       const item = items[index]!
-      if (item.kind === 'text') return item.text
+      if (item.kind === 'text') return item
       if (item.kind === 'user') return undefined
     }
     return undefined

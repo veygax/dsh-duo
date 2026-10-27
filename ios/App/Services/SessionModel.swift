@@ -25,6 +25,8 @@ final class SessionModel: Identifiable {
     var reveal: Reveal?
     /// A tap on the toolbar's jump to the top or the end, for the transcript to glide to.
     var jump: Jump?
+    /// Where a tapped notification asked to land, kept until the transcript is on screen to show it.
+    var landing: NotificationTarget?
     let search = TranscriptSearch()
 
     init(id: String) {
@@ -119,6 +121,14 @@ final class SessionModel: Identifiable {
 struct Reveal: Equatable {
     let itemId: String
     /// Picking the same row twice scrolls to it again.
+    let token = UUID()
+}
+
+/// A Session, and optionally the row in it, that a notification opens to.
+struct NotificationTarget: Equatable, Sendable {
+    let sessionId: String
+    /// Nil lands at the end, where the newest output and any question are.
+    let itemId: String?
     let token = UUID()
 }
 

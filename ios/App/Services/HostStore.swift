@@ -219,7 +219,8 @@ final class HostStore {
             if isVisible(sessionId) {
                 Haptics.success()
             } else {
-                Notifier.shared.local(title: title, body: summary, sessionId: sessionId, kind: "turn")
+                Notifier.shared.local(title: title, body: summary, sessionId: sessionId, kind: "turn",
+                                      itemId: event["itemId"]?.string)
             }
         default:
             break
@@ -265,6 +266,12 @@ final class HostStore {
     var modes: [Mode] { Mode.all(presets) }
 
     // MARK: Session operations
+
+    /// Open the Session a notification is about, landing on its row once the transcript shows.
+    func open(_ target: NotificationTarget) {
+        model(for: target.sessionId).landing = target
+        selectedSessionId = target.sessionId
+    }
 
     func model(for sessionId: String) -> SessionModel {
         if let model = models[sessionId] { return model }

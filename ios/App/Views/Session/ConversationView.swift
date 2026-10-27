@@ -12,6 +12,7 @@ struct ConversationView: View {
     let sessionId: String
     /// Owned here, not by the composer, so a tap anywhere in the transcript can put the keyboard away.
     @FocusState private var composerFocused: Bool
+    @State private var height: CGFloat = 0
 
     var body: some View {
         TranscriptView(model: model, session: store.sessions[sessionId])
@@ -24,11 +25,9 @@ struct ConversationView: View {
                 GlassEffectContainer(spacing: 10) {
                     VStack(spacing: 10) {
                         ForEach(store.questions(for: sessionId)) { question in
-                            if question.questions.first?.intent == "approval" {
-                                ApprovalCard(pending: question)
-                            } else {
-                                QuestionCard(pending: question)
-                            }
+                            // Most of the screen at most, less the card's header and buttons: while DeepSeek
+                            // waits, the prompt is what matters.
+                            PromptCard(pending: question, bodyLimit: max(160, height * 0.7 - 150))
                         }
                         ComposerView(model: model, sessionId: sessionId, focused: $composerFocused)
                     }
@@ -37,6 +36,7 @@ struct ConversationView: View {
                 .padding(.bottom, 8)
                 .animation(.snappy, value: store.questions(for: sessionId).map(\.id))
             }
+            .onGeometryChange(for: CGFloat.self, of: \.size.height) { height = $0 }
     }
 }
 
@@ -169,6 +169,7 @@ struct TranscriptView: View {
             guard placed, let jump = model.jump else { return }
             placeKeeper.jump(toEnd: jump.toEnd)
         }
+        .onChange(of: model.landing?.token) { land() }
         }
     }
 
@@ -184,6 +185,19 @@ struct TranscriptView: View {
         }
         proxy.scrollTo(Self.end, anchor: .bottom)
         withAnimation(.easeOut(duration: 0.15)) { placed = true }
+        land()
+    }
+
+    /// Show where a tapped notification pointed: its reply, marked, or else the end.
+    private func land() {
+        guard placed, !model.loading, let landing = model.landing else { return }
+        model.landing = nil
+        if let itemId = landing.itemId, model.items.contains(where: { $0.id == itemId }) {
+            model.reveal = Reveal(itemId: itemId)
+        } else {
+            following = true
+            placeKeeper.jump(toEnd: true)
+        }
     }
 
     private func stickToEnd(_ proxy: ScrollViewProxy, force: Bool = false) {

@@ -6,7 +6,15 @@ import UserNotifications
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
-    weak var store: HostStore?
+    /// Set once the first scene appears. A tap that launched the app arrives before that and waits here.
+    weak var store: HostStore? {
+        didSet {
+            guard let store, let waiting else { return }
+            self.waiting = nil
+            store.open(waiting)
+        }
+    }
+    private var waiting: NotificationTarget?
 
     func configure() {
         let center = UNUserNotificationCenter.current()
@@ -38,9 +46,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Notify about a Session the user is not looking at while the app is open.
-    func local(title: String, body: String, sessionId: String, kind: String, callId: String? = nil, questionId: String? = nil) {
+    func local(title: String, body: String, sessionId: String, kind: String, callId: String? = nil, questionId: String? = nil,
+               itemId: String? = nil) {
         let content = UNMutableNotificationContent()
-        let payload = PushPayload(kind: kind, sessionId: sessionId, title: title, body: body, callId: callId, questionId: questionId)
+        let payload = PushPayload(kind: kind, sessionId: sessionId, title: title, body: body, callId: callId,
+                                  questionId: questionId, itemId: itemId)
         payload.apply(to: content)
         content.sound = .default
         let identifier = "\(kind)-\(callId ?? sessionId)"
@@ -84,8 +94,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             await Badge.read(sessionId)
             return
         }
+        // A question waits at the end, under the conversation; a finished turn opens to its reply.
+        let target = NotificationTarget(sessionId: sessionId,
+                                        itemId: kind == "question" ? nil : info[NotificationIDs.itemKey] as? String)
         await MainActor.run {
-            store?.selectedSessionId = sessionId
+            if let store { store.open(target) } else { waiting = target }
         }
     }
 }

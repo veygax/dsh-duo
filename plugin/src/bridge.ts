@@ -402,12 +402,13 @@ export class Bridge {
       const last = items.findLast(item => item.kind === 'turn')
       const reason = last?.kind === 'turn' ? last.reason : 'completed'
       const reply = transcript.lastReply()
+      const itemId = transcript.lastReplyItem()?.id
       const title = this.directory.title(sessionId)
       const body = reason === 'cancelled' ? 'Stopped'
         : reason === 'error' ? 'The turn ended with an error'
           : reply === undefined ? 'Finished' : clip(reply.replace(/\s+/g, ' ').trim(), 280)
-      this.broadcast({ ev: 'turn.finished', sessionId, title, summary: body, reason })
-      this.push({ kind: 'turn', sessionId, title, body }, { category: 'TURN', thread: sessionId, collapse: `turn-${sessionId}`.slice(0, 64) })
+      this.broadcast({ ev: 'turn.finished', sessionId, title, summary: body, reason, itemId })
+      this.push({ kind: 'turn', sessionId, title, body, itemId }, { category: 'TURN', thread: sessionId, collapse: `turn-${sessionId}`.slice(0, 64) })
     } catch (error) {
       this.log.warn(`duo: could not summarize finished turn: ${String(error)}`)
     } finally {

@@ -11,6 +11,8 @@ nonisolated struct PushPayload: Codable, Sendable {
     var questionId: String?
     var options: [String]?
     var multi: Bool?
+    /// The reply a finished-turn notification opens to.
+    var itemId: String?
 }
 
 nonisolated enum NotificationIDs {
@@ -21,6 +23,7 @@ nonisolated enum NotificationIDs {
     static let sessionKey = "sessionId"
     static let callKey = "callId"
     static let questionKey = "questionId"
+    static let itemKey = "itemId"
     static let kindKey = "kind"
 }
 
@@ -39,6 +42,7 @@ extension PushPayload {
         var info: [String: Any] = [NotificationIDs.sessionKey: sessionId, NotificationIDs.kindKey: kind]
         if let callId { info[NotificationIDs.callKey] = callId }
         if let questionId { info[NotificationIDs.questionKey] = questionId }
+        if let itemId { info[NotificationIDs.itemKey] = itemId }
         content.userInfo = info
     }
 }
