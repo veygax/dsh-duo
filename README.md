@@ -5,6 +5,14 @@ A native SwiftUI remote for [DeepSeek Harness](https://github.com/deepseek-ai/de
 guidelines. Install the companion plugin on the machine that runs dsh, scan a QR code, and drive your sessions from
 anywhere: no VPN, no port forwarding, end-to-end encrypted.
 
+<p align="center">
+  <img src="docs/images/sessions.png" width="24%" alt="Sessions grouped by workspace, with each session's mode and last activity">
+  <img src="docs/images/session.png" width="24%" alt="A session with collapsible thinking, a Markdown reply and copyable code blocks">
+  <img src="docs/images/commands.png" width="24%" alt="Typing / lists the session's dsh commands and skills">
+  <img src="docs/images/question.png" width="24%" alt="DeepSeek asks a question; tap an option to answer">
+</p>
+<p align="center"><sub>Sessions · Streaming replies and code · Slash commands · Questions answered in one tap</sub></p>
+
 ```
  iPhone Duo app  ──wss──▶  relay (forwards ciphertext)  ◀──wss──  dsh + dsh-plugin-duo-remote
        ▲                                                             │
