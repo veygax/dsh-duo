@@ -81,11 +81,6 @@ struct AddWorkspaceSheet: View {
                         .toggleStyle(.button)
                         .sensoryFeedback(.selection, trigger: showHidden)
                 }
-                ToolbarItem(placement: .status) {
-                    if let listing {
-                        Text("Add “\(URL(fileURLWithPath: listing.path).lastPathComponent)”").font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
             }
             .overlay { if loading && listing != nil { ProgressView() } }
             .task { load(nil) }
