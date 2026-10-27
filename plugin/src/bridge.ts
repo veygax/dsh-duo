@@ -381,6 +381,14 @@ export class Bridge {
     const title = this.directory.title(sessionId)
     this.broadcast({ ev: 'question', sessionId, callId, title, questions: question.questions, state: question.state })
     const first = question.questions[0]
+    // A permission ask gets its own notification, with Allow Once and Deny on the lock screen.
+    if (first?.intent === 'approval') {
+      this.push({
+        kind: 'approval', sessionId, callId, title, questionId: first.id,
+        tool: first.header, body: clip(first.detail ?? '', 240),
+      }, { category: 'APPROVAL', thread: sessionId, collapse: callId.slice(0, 64) })
+      return
+    }
     this.push({
       kind: 'question',
       sessionId,

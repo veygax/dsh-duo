@@ -29,11 +29,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             textInputButtonTitle: "Send", textInputPlaceholder: "Your answer")
         let open = UNNotificationAction(identifier: NotificationIDs.openAction, title: "Open",
                                         options: [.foreground], icon: UNNotificationActionIcon(systemImageName: "arrow.up.forward.app"))
+        // Allowing runs something on the Mac, so it asks for Face ID from the lock screen.
+        let allow = UNNotificationAction(identifier: NotificationIDs.allowAction, title: NotificationIDs.allowLabel,
+                                         options: [.authenticationRequired], icon: UNNotificationActionIcon(systemImageName: "checkmark"))
+        let deny = UNNotificationAction(identifier: NotificationIDs.denyAction, title: NotificationIDs.denyLabel,
+                                        options: [.destructive], icon: UNNotificationActionIcon(systemImageName: "xmark"))
         center.setNotificationCategories([
             UNNotificationCategory(identifier: NotificationIDs.turnCategory, actions: [reply, open], intentIdentifiers: [],
                                    hiddenPreviewsBodyPlaceholder: "A turn finished", options: []),
             UNNotificationCategory(identifier: NotificationIDs.questionCategory, actions: [answer, open], intentIdentifiers: [],
                                    hiddenPreviewsBodyPlaceholder: "DeepSeek has a question", options: []),
+            UNNotificationCategory(identifier: NotificationIDs.approvalCategory, actions: [allow, deny], intentIdentifiers: [],
+                                   hiddenPreviewsBodyPlaceholder: "DeepSeek needs your permission", options: []),
         ])
     }
 
@@ -47,10 +54,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Notify about a Session the user is not looking at while the app is open.
     func local(title: String, body: String, sessionId: String, kind: String, callId: String? = nil, questionId: String? = nil,
-               itemId: String? = nil) {
+               itemId: String? = nil, tool: String? = nil) {
         let content = UNMutableNotificationContent()
         let payload = PushPayload(kind: kind, sessionId: sessionId, title: title, body: body, callId: callId,
-                                  questionId: questionId, itemId: itemId)
+                                  questionId: questionId, itemId: itemId, tool: tool)
         payload.apply(to: content)
         content.sound = .default
         let identifier = "\(kind)-\(callId ?? sessionId)"
@@ -72,10 +79,23 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return visible ? [] : [.banner, .list, .sound, .badge]
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    /// On the main actor: UIKit snapshots the app when this returns and asserts if that happens off the main thread,
+    /// which aborted the app after any action answered in the background (Reply, Allow Once, Deny).
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         guard let sessionId = info[NotificationIDs.sessionKey] as? String else { return }
         let kind = info[NotificationIDs.kindKey] as? String
+        let decision = [NotificationIDs.allowAction: NotificationIDs.allowLabel,
+                        NotificationIDs.denyAction: NotificationIDs.denyLabel][response.actionIdentifier]
+        if let decision, let callId = info[NotificationIDs.callKey] as? String,
+           let questionId = info[NotificationIDs.questionKey] as? String, let pairing = PairingStore.load() {
+            try? await RelayClient.post(pairing, op: "question.answer", params: [
+                "sessionId": sessionId, "callId": callId,
+                "answers": [["id": questionId, "selected": [decision]]],
+            ])
+            await Badge.read(sessionId)
+            return
+        }
         if response.actionIdentifier == NotificationIDs.replyAction,
            let text = (response as? UNTextInputNotificationResponse)?.userText.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty, let pairing = PairingStore.load() {
@@ -97,9 +117,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // A question waits at the end, under the conversation; a finished turn opens to its reply.
         let target = NotificationTarget(sessionId: sessionId,
                                         itemId: kind == "question" ? nil : info[NotificationIDs.itemKey] as? String)
-        await MainActor.run {
-            if let store { store.open(target) } else { waiting = target }
-        }
+        if let store { store.open(target) } else { waiting = target }
     }
 }
 

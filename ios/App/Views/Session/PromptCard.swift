@@ -17,8 +17,8 @@ struct PromptCard: View {
     @State private var forward = true
 
     /// The labels the plugin offers for a tool permission.
-    static let allow = "Allow Once"
-    static let deny = "Deny"
+    static let allow = NotificationIDs.allowLabel
+    static let deny = NotificationIDs.denyLabel
 
     private enum Kind { case approval, review, question }
 

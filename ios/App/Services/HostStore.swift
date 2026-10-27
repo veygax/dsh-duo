@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import QuickLook
 import SwiftUI
+import UserNotifications
 import UIKit
 
 /// App-wide state for the paired dsh Host: connection, Sessions, Workspaces,
@@ -206,12 +207,20 @@ final class HostStore {
                                                 title: event["title"]?.string ?? "Session", questions: items)
             if isNew && !isVisible(sessionId) {
                 Haptics.attention()
+                let first = items.first
+                let approval = first?.intent == "approval"
                 Notifier.shared.local(title: event["title"]?.string ?? "dsh",
-                                      body: items.first?.question ?? "DeepSeek has a question",
-                                      sessionId: sessionId, kind: "question", callId: callId, questionId: items.first?.id)
+                                      body: approval ? first?.detail ?? "" : first?.question ?? "DeepSeek has a question",
+                                      sessionId: sessionId, kind: approval ? "approval" : "question", callId: callId,
+                                      questionId: first?.id, tool: approval ? first?.header : nil)
             }
         case "question.resolved":
-            if let callId = event["callId"]?.string { questions[callId] = nil }
+            if let callId = event["callId"]?.string {
+                questions[callId] = nil
+                // Answered here or on the Mac: its notification would only offer a choice that is gone.
+                UNUserNotificationCenter.current().removeDeliveredNotifications(
+                    withIdentifiers: [callId, "question-\(callId)", "approval-\(callId)"])
+            }
         case "turn.finished":
             guard let sessionId = event["sessionId"]?.string else { return }
             let title = event["title"]?.string ?? "Session"
