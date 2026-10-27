@@ -10,7 +10,7 @@ import { homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
 import { Directory, type QuestionView, type SessionView } from './directory.ts'
-import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent, HostContext } from './host.ts'
+import type { ApprovalOutcome, ApprovalRequestEvent, AskUserQuestionAnswer, AskUserQuestionRequestEvent, HostContext } from './host.ts'
 import { loadPairing, pairingLink, pairingPath, pairingSvg, rotatePairing, savePairing, type Pairing } from './pairing.ts'
 import { Phones } from './phones.ts'
 import { RelayLink } from './relay.ts'
@@ -264,6 +264,70 @@ export class Bridge {
     // Prepend so the phone sees the question even while a Web client is also open.
     on('user-questions/request', ((request: AskUserQuestionRequestEvent, next: () => Promise<AskUserQuestionAnswer>) =>
       this.onQuestionRequest(request, next)) as never, { prepend: true })
+    // Tool permission asks travel apart from questions; without this the phone only sees the tool hang.
+    on('approval/request', ((request: ApprovalRequestEvent, next: () => Promise<ApprovalOutcome>) =>
+      this.onApprovalRequest(request, next)) as never, { prepend: true })
+  }
+
+  /**
+   * Hold one tool permission ask for the phone as a single question whose intent is `approval`, so
+   * it travels, re-sends and notifies like any question. Whichever of the phone and the desktop
+   * answers first decides; the other's prompt is closed through the signal it was handed.
+   */
+  private async onApprovalRequest(request: ApprovalRequestEvent, next: () => Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
+    const agent = request.agent
+    if (agent === undefined || this.pairing.paired !== true) return await next()
+    const sessionId = String(agent.session.id)
+    const callId = `a-${randomUUID()}`
+    const reason = typeof request.displayReason === 'string' ? request.displayReason
+      : request.displayReason?.en ?? request.reason
+
+    let settle!: (outcome: ApprovalOutcome) => void
+    const fromPhone = new Promise<ApprovalOutcome>((resolve) => { settle = resolve })
+    const view: QuestionView = {
+      callId,
+      state: 'open',
+      questions: [{
+        id: 'approval',
+        question: `Allow ${request.toolName}?`,
+        header: request.toolName,
+        ...reason === undefined ? {} : { detail: reason },
+        options: [{ label: APPROVAL_ALLOW }, { label: APPROVAL_DENY }],
+        multiSelect: false,
+        intent: 'approval',
+      }],
+    }
+    this.held.set(callId, {
+      sessionId, callId, view,
+      resolve: answer => settle(answer.answers[0]?.selected.includes(APPROVAL_ALLOW) === true ? 'allowed-once' : 'rejected'),
+    })
+    this.announce(sessionId, callId, view)
+
+    // The desktop's prompt watches the request's signal; one that also ends when the phone answers
+    // takes it down then. The request is the object the rest of the waterfall receives.
+    const closeDesktop = new AbortController()
+    const original = request.signal
+    try {
+      ;(request as { signal?: AbortSignal }).signal = original === undefined
+        ? closeDesktop.signal
+        : AbortSignal.any([original, closeDesktop.signal])
+    } catch { /* a frozen request keeps its own signal */ }
+
+    const ended = new Promise<ApprovalOutcome>((resolve) => {
+      if (original === undefined) return
+      if (original.aborted) resolve('cancelled')
+      original.addEventListener('abort', () => resolve('cancelled'), { once: true })
+    })
+    // No other answerer ends in `unavailable`; then only the phone (or the call ending) decides.
+    const fromDesktop = next().then(outcome => outcome === 'unavailable' ? fromPhone : outcome, () => fromPhone)
+    try {
+      return await Promise.race([fromPhone, fromDesktop, ended])
+    } finally {
+      closeDesktop.abort(new Error('answered on the phone'))
+      try { (request as { signal?: AbortSignal }).signal = original } catch { /* frozen */ }
+      this.held.delete(callId)
+      this.broadcast({ ev: 'question.resolved', sessionId, callId })
+    }
   }
 
   private async onQuestionRequest(
@@ -928,6 +992,9 @@ export class Bridge {
     }, 80)
   }
 }
+
+const APPROVAL_ALLOW = 'Allow Once'
+const APPROVAL_DENY = 'Deny'
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`

@@ -24,7 +24,11 @@ struct ConversationView: View {
                 GlassEffectContainer(spacing: 10) {
                     VStack(spacing: 10) {
                         ForEach(store.questions(for: sessionId)) { question in
-                            QuestionCard(pending: question)
+                            if question.questions.first?.intent == "approval" {
+                                ApprovalCard(pending: question)
+                            } else {
+                                QuestionCard(pending: question)
+                            }
                         }
                         ComposerView(model: model, sessionId: sessionId, focused: $composerFocused)
                     }

@@ -109,6 +109,7 @@ struct ComposerView: View {
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.circle)
             .tint(.red)
+            .keyboardShortcut(".", modifiers: .command)
             .accessibilityHint("Stops the current turn")
         } else if running {
             // Tap steers; press and hold for the choice. Menu's primary action is the system's

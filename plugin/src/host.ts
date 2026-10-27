@@ -78,6 +78,18 @@ export interface AskUserQuestionRequestEvent {
   wait?: { callId: string; timed?: boolean }
 }
 
+/** dsh asking whether one tool call may run (`approval/request`). Only `allowed-once` grants it. */
+export interface ApprovalRequestEvent {
+  toolName: string
+  callId?: string
+  reason?: string
+  displayReason?: string | { en?: string; zh?: string }
+  agent?: { readonly id: string; readonly session: { readonly id: string } }
+  signal?: AbortSignal
+}
+
+export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+
 /** Host Context as this plugin uses it. */
 export interface HostContext {
   readonly typertGateway: TypertGateway

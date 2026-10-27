@@ -157,20 +157,6 @@ struct SessionView: View {
 
     @ToolbarContentBuilder
     private func toolbar(_ session: SessionInfo?) -> some ToolbarContent {
-        // Stop affects the turn, the overflow menu the session: separate items, not one shared group.
-        // Present the whole item only while a turn runs, rather than hiding the view inside it.
-        if session?.running == true {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Stop", systemImage: "stop.fill", action: tap {
-                    Task { await store.cancel(sessionId) }
-                })
-                .keyboardShortcut(".", modifiers: .command)
-            }
-            .visibilityPriority(.high)
-
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-        }
-
         // A trailing menu rather than the system overflow menu, which the toolbar always puts last:
         // this way search sits under it.
         ToolbarItem(placement: .topBarTrailing) {

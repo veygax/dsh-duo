@@ -5,7 +5,8 @@
  *   node dev/demo-host.ts --relay http://127.0.0.1:8787
  *
  * Prompts stream back thinking, a tool call and a reply; a prompt containing
- * "ask" makes DeepSeek ask a question; `/compact` runs a command.
+ * "ask" makes DeepSeek ask a question; "permission" makes its tool call ask for approval;
+ * `/compact` runs a command.
  */
 
 import { mkdtemp } from 'node:fs/promises'
@@ -209,7 +210,16 @@ async function runTurn(id: string, prompt: string): Promise<void> {
     { type: 'tool-call', id: callId, name: 'bash', arguments: JSON.stringify({ command: 'git status --short && npm test -- --silent' }) },
   ] } }, Date.now()))
   await sleep(1200)
-  append(id, ev('tool/result', { turn, step: 1, message: { id: `m${seq}`, role: 'tool', toolCallId: callId, content: [{ type: 'text', text: ' M src/auth/session.ts\n\nTests: 128 passed, 128 total' }] } }, Date.now()))
+  const outcome = /\bpermission\b/i.test(prompt)
+    ? await emit('approval/request', {
+      toolName: 'bash', callId, agent: { id, session: { id } },
+      reason: 'escalate sandbox to danger-full-access: npm test needs the network',
+      displayReason: { en: 'Allow this operation with danger-full-access permissions: npm test needs the network' },
+    }, () => Promise.resolve('unavailable')) as string
+    : 'allowed-once'
+  append(id, ev('tool/result', { turn, step: 1, message: { id: `m${seq}`, role: 'tool', toolCallId: callId, isError: outcome !== 'allowed-once', content: [{ type: 'text', text: outcome === 'allowed-once'
+    ? ' M src/auth/session.ts\n\nTests: 128 passed, 128 total'
+    : `Approval ${outcome}: the user did not allow this call` }] } }, Date.now()))
 
   if (/\bask\b/i.test(prompt)) {
     const answer = await emit('user-questions/request', {

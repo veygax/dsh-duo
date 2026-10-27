@@ -23,6 +23,7 @@
 		43FC4A48B8F4D08272381431 /* ItemViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4614BDF2C92334DC5EC9D83 /* ItemViews.swift */; };
 		45DFEB1B9F353EC48D8C3B3C /* SelectTextSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338C4E47FB1EAE43FDD05726 /* SelectTextSheet.swift */; };
 		4BC1185B00D9D2EC39561038 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8ED8525A7E7B1625F5576F1 /* SessionModel.swift */; };
+		5818D3219F780002E941BC57 /* ApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06404C8F667B5B02F93F7611 /* ApprovalCard.swift */; };
 		593547C2D2E2C7D646E81836 /* AddWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E46FE1DF6D31195F57F2F6C /* AddWorkspaceSheet.swift */; };
 		5DF12C98361A035A3386F894 /* DSHDuoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17499819E8DC35D8A497900 /* DSHDuoTests.swift */; };
 		6741E703B4D843FCC64B4C65 /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D594302B722D7E193A46A3 /* PushPayload.swift */; };
@@ -85,6 +86,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		06404C8F667B5B02F93F7611 /* ApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCard.swift; sourceTree = "<group>"; };
 		0B79F5CD7CE78A02BDADACA6 /* MessageNotification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotification.swift; sourceTree = "<group>"; };
 		114705792DD8A39638541EBB /* NewSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionSheet.swift; sourceTree = "<group>"; };
 		1776AEA301FA6D6F36488120 /* RelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayClient.swift; sourceTree = "<group>"; };
@@ -205,6 +207,7 @@
 		7E936E651902DBF56F392401 /* Session */ = {
 			isa = PBXGroup;
 			children = (
+				06404C8F667B5B02F93F7611 /* ApprovalCard.swift */,
 				57F83951A91E7178FE4F4FE7 /* ComposerView.swift */,
 				DCEA930A7B1ED75196A172AD /* ConversationView.swift */,
 				65F6BB29DAD01D9463DA88BA /* DetailPane.swift */,
@@ -409,6 +412,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				593547C2D2E2C7D646E81836 /* AddWorkspaceSheet.swift in Sources */,
+				5818D3219F780002E941BC57 /* ApprovalCard.swift in Sources */,
 				725FAE287017D43758FB631F /* ComposerView.swift in Sources */,
 				1EE7CE58C9F24C6E4C6EED13 /* ConversationView.swift in Sources */,
 				0E03724D3EF9DC847B02DF86 /* DSHDuoApp.swift in Sources */,
