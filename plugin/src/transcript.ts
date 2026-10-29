@@ -4,8 +4,22 @@
  * dsh can evolve its log format behind this one file.
  */
 
+/** One durable image or file a message carries, as the phone renders it. */
+export interface AttachmentRef {
+  kind: 'image' | 'file'
+  /** Content-addressed storage id (sha256:…); the phone reads bytes by it. */
+  attachmentId: string
+  /** Display name, never a host path. */
+  name?: string
+  /** Image media type; absent on files. */
+  mediaType?: string
+  bytes: number
+  width?: number
+  height?: number
+}
+
 export type Item =
-  | { id: string; kind: 'user'; text: string; time: number; images?: number }
+  | { id: string; kind: 'user'; text: string; time: number; images?: number; attachments?: AttachmentRef[] }
   | { id: string; kind: 'thinking'; text: string; time: number; turn: number }
   | { id: string; kind: 'text'; text: string; time: number; turn: number }
   | {
@@ -18,6 +32,7 @@ export type Item =
     turn: number
     status: 'running' | 'ok' | 'error'
     result?: string
+    attachments?: AttachmentRef[]
   }
   | { id: string; kind: 'notice'; text: string; time: number; level: 'info' | 'error' }
   | { id: string; kind: 'turn'; time: number; turn: number; reason: string }
@@ -47,10 +62,31 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}\n… (${text.length - max} more characters)`
 }
 
-/** Plain text of a content block list; images and files become short placeholders. */
-export function blocksText(content: unknown): { text: string; images: number } {
-  let images = 0
+/** One image or file block's durable reference, as the phone renders it. */
+function attachmentOf(block: Json): AttachmentRef | undefined {
+  if (block.type !== 'image' && block.type !== 'file') return undefined
+  const ref = obj(block.attachment) ?? block
+  if (typeof ref.attachmentId !== 'string' || ref.attachmentId === '') return undefined
+  const bytes = typeof ref.bytes === 'number' && Number.isFinite(ref.bytes) ? ref.bytes : 0
+  const name = typeof ref.name === 'string' && ref.name !== '' ? ref.name : undefined
+  if (block.type === 'file') {
+    return { kind: 'file', attachmentId: ref.attachmentId, bytes, ...name === undefined ? {} : { name } }
+  }
+  const mediaType = typeof ref.mediaType === 'string' ? ref.mediaType : 'image/png'
+  const width = typeof ref.width === 'number' ? ref.width : undefined
+  const height = typeof ref.height === 'number' ? ref.height : undefined
+  return {
+    kind: 'image', attachmentId: ref.attachmentId, bytes, mediaType,
+    ...name === undefined ? {} : { name },
+    ...width === undefined ? {} : { width },
+    ...height === undefined ? {} : { height },
+  }
+}
+
+/** Plain text and durable attachments of a content block list. */
+export function blocksContent(content: unknown): { text: string; attachments: AttachmentRef[] } {
   const parts: string[] = []
+  const attachments: AttachmentRef[] = []
   for (const raw of arr(content)) {
     const block = obj(raw)
     if (block === undefined) continue
@@ -59,15 +95,20 @@ export function blocksText(content: unknown): { text: string; images: number } {
         if (typeof block.text === 'string') parts.push(block.text)
         break
       case 'image':
-        images++
+      case 'file': {
+        const attachment = attachmentOf(block)
+        if (attachment !== undefined) attachments.push(attachment)
         break
-      case 'file':
-        parts.push(`[file ${typeof block.name === 'string' ? block.name : 'attachment'}]`)
-        break
+      }
       default:
     }
   }
-  return { text: parts.join('\n').trim(), images }
+  return { text: parts.join('\n').trim(), attachments }
+}
+
+/** Plain text of a content block list, for notifications and one-line summaries. */
+export function blocksText(content: unknown): string {
+  return blocksContent(content).text
 }
 
 /** Human-authored prompt sources; injected context and goal rounds stay hidden. */
@@ -120,12 +161,18 @@ export class Transcript {
         const source = obj(message.source)
         const kind = typeof source?.kind === 'string' ? source.kind : 'user'
         if (!HUMAN_SOURCES.has(kind) && kind !== 'user') break
-        const { text, images } = blocksText(message.content)
-        if (text === '' && images === 0) break
+        const { text, attachments } = blocksContent(message.content)
+        if (text === '' && attachments.length === 0) break
         if (kind === 'user-question-reply') {
           put({ id: `u${event.seq}`, kind: 'notice', text: `Answered: ${clip(text, 400)}`, time: event.time, level: 'info' })
         } else {
-          put({ id: `u${event.seq}`, kind: 'user', text, time: event.time, ...images > 0 ? { images } : {} })
+          // `images` is the older count-only shape; phones that know `attachments` ignore it.
+          const images = attachments.filter(attachment => attachment.kind === 'image').length
+          put({
+            id: `u${event.seq}`, kind: 'user', text, time: event.time,
+            ...images > 0 ? { images } : {},
+            ...attachments.length > 0 ? { attachments } : {},
+          })
         }
         break
       }
@@ -162,13 +209,13 @@ export class Transcript {
         const existing = this.items.get(`c${callId}`)
         const failed = message?.isError === true
         const error = obj(data.error)
-        const text = blocksText(message?.content).text
+        const { text, attachments } = blocksContent(message?.content)
         const result = clip(failed && typeof error?.reason === 'string' ? `${error.reason}\n${text}`.trim() : text, MAX_RESULT)
         this.place(`c${callId}`, event.seq * 1000)
         const base = existing?.kind === 'tool'
           ? existing
           : { id: `c${callId}`, kind: 'tool' as const, callId, name: 'tool', args: '', time: event.time, turn: this.toolTurn.get(callId) ?? turn }
-        put({ ...base, status: failed ? 'error' : 'ok', result })
+        put({ ...base, status: failed ? 'error' : 'ok', result, ...attachments.length > 0 ? { attachments } : {} })
         break
       }
       case 'turn/end': {
@@ -223,6 +270,20 @@ export class Transcript {
   /** Items in display order. */
   ordered(): Item[] {
     return [...this.items.values()].sort((a, b) => (this.order.get(a.id) ?? 0) - (this.order.get(b.id) ?? 0))
+  }
+
+  /**
+   * One attachment this Session's transcript references, by storage id. The phone may only
+   * read bytes for images and files the log itself names, so this is the authorization check.
+   */
+  attachment(attachmentId: string): AttachmentRef | undefined {
+    for (const item of this.items.values()) {
+      const found = item.kind === 'user' || item.kind === 'tool'
+        ? item.attachments?.find(ref => ref.attachmentId === attachmentId)
+        : undefined
+      if (found !== undefined) return found
+    }
+    return undefined
   }
 
   /** The most recent assistant reply, for notifications. */

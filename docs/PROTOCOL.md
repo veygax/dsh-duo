@@ -93,7 +93,10 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `session.open` | `sessionId` | `{ session, items: Item[], hasMore }` then `session.items`/`session.live` events |
 | `session.older` | `sessionId` (open) | `{ items: Item[], hasMore }`: the page before the oldest item held, read with dsh's `session/page`; the phone reads every page in the background right after `session.open` |
 | `session.close` | `sessionId` | — |
-| `session.prompt` | `sessionId`, `text`, `mode: "queue"\|"steer"` | `{ kind: "prompt" \| "command" }` |
+| `session.prompt` | `sessionId`, `text?`, `mode: "queue"\|"steer"`, `uploads?: string[]` | `{ kind: "prompt" \| "command" }` |
+| `attachment.upload` | `sessionId`, `kind: "image"\|"file"`, `name`, `mediaType?`, `data`, `uploadId?`, `offset?`, `done?` | `{ uploadId, received, done }` |
+| `attachment.discard` | `uploadId` | — |
+| `attachment.read` | `sessionId`, `attachmentId`, `offset?`, `length?` | `{ attachment, offset, data, next? }` |
 | `session.cancel` | `sessionId` | — |
 | `session.model` | `sessionId`, `provider`, `model`, `effort?` | `ModelSelection` |
 | `session.preset` | `sessionId`, `preset` | `{ preset }` |
@@ -104,7 +107,7 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `session.goal.resume` | `sessionId`, `goalId`, `revision` | `Goal` |
 | `session.goal.clear` | `sessionId`, `goalId`, `revision` | `null` |
 | `models.catalog` | — | `{ default, groups: [{ id, name, models: [{ id, name, description?, efforts: [{ id, name }], defaultEffort? }] }] }` |
-| `commands.list` | `sessionId` | `[{ name, description, hint?, kind: "command"\|"skill" }]` |
+| `commands.list` | `sessionId` | `[{ name, description, hint?, kind: "command"\|"skill", attachments? }]` |
 | `push.register` | `token`, `env: "sandbox"\|"production"`, `topic` | `{ enabled }` |
 | `question.answer` | `sessionId`, `callId`, `answers: [{ id, selected: [], custom? }]` | `{ accepted }` |
 
@@ -140,15 +143,44 @@ Goal = {
 }
 Workspace = { id, title, path, sessionIds: string[] }
 Item =
-  | { id, kind: "user", text, time }
+  | { id, kind: "user", text, time, images?, attachments?: Attachment[] }
   | { id, kind: "thinking", text, time, turn }
   | { id, kind: "text", text, time, turn }
-  | { id, kind: "tool", callId, name, args, time, turn, status: "running"|"ok"|"error", result?, }
+  | { id, kind: "tool", callId, name, args, time, turn, status: "running"|"ok"|"error", result?, attachments?: Attachment[] }
   | { id, kind: "notice", text, time, level: "info"|"error" }
   | { id, kind: "turn", time, turn, reason }
+Attachment = {
+  kind: "image" | "file",
+  attachmentId,                    // content-addressed storage id, sha256:…
+  name?,                           // display name, never a path
+  mediaType?,                      // image/png, image/jpeg, image/webp or image/gif
+  bytes, width?, height?,          // image dimensions, when the log records them
+}
 LiveAttempt = { attemptId, thinking, text, tools: [{ id, name, args }] }
 Question = { id, question, header?, detail?, options: [{ label, description? }], multiSelect, intent? }
 ```
+
+`images` is the older count-only field, kept for phones that predate `attachments`; it counts images
+only, while `attachments` lists every image and file in message order.
+
+### Attachments
+
+The phone sends an attachment in frames small enough for the relay, then names the finished
+upload in `session.prompt`. The first `attachment.upload` names `kind`, `name` and (for images)
+`mediaType`; it returns the `uploadId` every later frame repeats with `offset` (the bytes received
+so far) and `data` (canonical base64). The last frame sets `done`. A frame carries at most
+1.5 MB of raw bytes; an image is bounded by the Host's image limit (normally 20 MB), a file by 256 MB.
+`attachment.discard` or a 30-minute timeout drops an upload the phone abandons.
+
+`session.prompt` turns finished uploads into dsh content parts: an image is normalized and stored
+by dsh's attachment service, a file becomes a staged file-upload receipt. The Host deletes the
+staging copy once the prompt is accepted. Text may be empty when at least one upload is named;
+`commands/execute` receives the same parts, so a command that declares `attachments` can use them.
+
+Images and files in the durable log come back as `Attachment` values on their item.
+`attachment.read` returns the stored bytes in chunks of at most 1 MiB, with `next` set to the
+offset of the following chunk and absent on the last one. Only an attachment the Session's own
+log names can be read. The phone renders an image from these bytes and opens a file in QuickLook.
 
 Push payload (sealed in `e`): `{ kind: "turn"|"question", sessionId, title, body, callId?, questions? }`
 

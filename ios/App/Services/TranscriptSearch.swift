@@ -47,9 +47,17 @@ actor TranscriptSearch {
     /// What a row says, as the reader sees it; dividers and empty rows have nothing to find.
     private static func text(of item: TranscriptItem) -> String? {
         switch item.kind {
-        case .user, .text, .thinking, .notice: item.text.flatMap { $0.isEmpty ? nil : $0 }
-        case .tool: [item.name, item.args, item.result].compactMap(\.self).joined(separator: "\n")
-        case .turn, .unknown: nil
+        case .user:
+            let names = item.attachments?.map(\.displayName) ?? []
+            let parts = ([item.text].compactMap { $0 } + names).filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        case .text, .thinking, .notice:
+            return item.text.flatMap { $0.isEmpty ? nil : $0 }
+        case .tool:
+            let names = item.attachments?.map(\.displayName) ?? []
+            return ([item.name, item.args, item.result].compactMap { $0 } + names).joined(separator: "\n")
+        case .turn, .unknown:
+            return nil
         }
     }
 

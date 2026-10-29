@@ -57,6 +57,8 @@ class Feed<T> implements AsyncIterable<T> {
 }
 
 const calls: InvokeRemoteRequest[] = []
+/** Bytes behind every content-addressed attachment this fake Host knows. */
+const attachmentData = new Map<string, Uint8Array>()
 /** The Host activates its Session service after the plugin applies; the first list loses that race. */
 let sessionListFailures = 1
 const listeners = new Map<string, Array<(...args: never[]) => unknown>>()
@@ -128,7 +130,21 @@ const ctx: HostContext = {
           const req = request.args.request as Record<string, string>
           return { selected: { provider: req.provider, model: req.model, reasoningEffort: req.reasoningEffort } }
         }
-        case 'commands/list': return [{ name: 'compact', description: 'Summarize history' }]
+        case 'commands/list': return [
+          { name: 'compact', description: 'Summarize history' },
+          { name: 'review', description: 'Review the diff', input: { hint: '<path>', attachments: true } },
+        ]
+        case 'fileUploads/upload': {
+          const req = request.args.request as { data: string; name?: string }
+          const bytes = Buffer.from(req.data, 'base64')
+          const attachmentId = `sha256:${'f'.repeat(64)}`
+          attachmentData.set(attachmentId, bytes)
+          return { receiptId: 'receipt-1', file: { attachmentId, name: req.name ?? 'file', bytes: bytes.byteLength } }
+        }
+        case 'session/attachment': {
+          const req = request.args.request as { attachmentId: string }
+          return { attachment: { attachmentId: req.attachmentId, mediaType: 'image/png', bytes: attachmentData.get(req.attachmentId)?.byteLength ?? 0, width: 2, height: 2 }, data: Buffer.from(attachmentData.get(req.attachmentId) ?? []).toString('base64') }
+        }
         case 'skills/list': return { skills: [{ name: 'review', description: 'Review the diff', modelInvocable: true }] }
         case 'commands/execute':
           commands.push({ name: String(request.args.line) })
@@ -170,6 +186,16 @@ const ctx: HostContext = {
   get: ((name: string) => {
     if (name === 'profileContext') return { home }
     if (name === 'typert') return { register: (manifest: unknown) => { manifests.push(manifest); return () => {} } }
+    if (name === 'attachments') {
+      return {
+        imageLimits: { maxImageBytes: 20 * 1024 * 1024, maxImagesPerMessage: 20, maxMessageImageBytes: 200 * 1024 * 1024, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
+        readImage: async (ref: { attachmentId: string }) => ({ ref, data: attachmentData.get(ref.attachmentId)! }),
+        imageHostPath: () => undefined,
+        fileHostPath: () => undefined,
+        readFileStream: async function* (ref: { attachmentId: string }) { yield attachmentData.get(ref.attachmentId)! },
+        isAttachmentError: () => false,
+      }
+    }
     return undefined
   }) as HostContext['get'],
   provide(name: string, value: unknown) {
@@ -340,6 +366,91 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.deepEqual(sent.value, { kind: 'prompt' })
   const prompt = calls.findLast(call => call.method === 'prompt')!.args.request as Record<string, unknown>
   assert.deepEqual(prompt.content, [{ type: 'text', text: 'Thanks!' }])
+  const review = (listed.value as Array<{ name: string; attachments?: boolean }>).find(row => row.name === 'review')
+  assert.equal(review?.attachments, true)
+
+  // A file uploads in chunks, then rides the prompt as a dsh file receipt.
+  const fileBytes = Buffer.from('hello from the phone\n')
+  const fileStart = await phone.call('attachment.upload', {
+    sessionId: 'sess-1', kind: 'file', name: 'notes.txt', data: fileBytes.subarray(0, 8).toString('base64'),
+  })
+  const fileUploadId = (fileStart.value as { uploadId: string }).uploadId
+  assert.equal((fileStart.value as { done: boolean }).done, false)
+  const fileEnd = await phone.call('attachment.upload', {
+    sessionId: 'sess-1', uploadId: fileUploadId, offset: 8,
+    data: fileBytes.subarray(8).toString('base64'), done: true,
+  })
+  assert.equal((fileEnd.value as { done: boolean }).done, true)
+  const sentWithFile = await phone.call('session.prompt', { sessionId: 'sess-1', text: 'Read this', uploads: [fileUploadId] })
+  assert.deepEqual(sentWithFile.value, { kind: 'prompt' })
+  const filePrompt = calls.findLast(call => call.namespace === 'session' && call.method === 'prompt')!.args.request as Record<string, unknown>
+  assert.deepEqual(filePrompt.content, [{ type: 'text', text: 'Read this' }, { type: 'file', receiptId: 'receipt-1' }])
+  const storedFile = calls.findLast(call => call.namespace === 'fileUploads')!.args.request as Record<string, unknown>
+  assert.equal(storedFile.data, fileBytes.toString('base64'))
+  assert.equal(storedFile.name, 'notes.txt')
+
+  // An image rides the prompt as dsh's encoded image content; a picture alone is a message too.
+  const imageBytes = Buffer.from('89504e470d0a1a0a', 'hex')
+  const image = await phone.call('attachment.upload', {
+    sessionId: 'sess-1', kind: 'image', name: 'shot.png', mediaType: 'image/png', data: imageBytes.toString('base64'), done: true,
+  })
+  const imageUploadId = (image.value as { uploadId: string }).uploadId
+  const sentImage = await phone.call('session.prompt', { sessionId: 'sess-1', uploads: [imageUploadId] })
+  assert.deepEqual(sentImage.value, { kind: 'prompt' })
+  const imagePrompt = calls.findLast(call => call.namespace === 'session' && call.method === 'prompt')!.args.request as Record<string, unknown>
+  assert.deepEqual(imagePrompt.content, [
+    { type: 'image', mediaType: 'image/png', data: imageBytes.toString('base64'), name: 'shot.png' },
+  ])
+
+  // Durable attachments project into items, and their bytes read back a chunk at a time.
+  const big = Buffer.alloc(1024 * 1024 + 32, 7)
+  const imageId = `sha256:${'a'.repeat(64)}`
+  attachmentData.set(imageId, big)
+  followFeed.push({ type: 'event', event: { type: 'user/message', seq: 30, time: 400, data: { message: {
+    id: 'm30', role: 'user', source: { kind: 'user' }, content: [
+      { type: 'text', text: 'A picture and a log' },
+      { type: 'image', attachment: { attachmentId: imageId, mediaType: 'image/png', bytes: big.byteLength, width: 8, height: 8 } },
+    ],
+  } } } })
+  const withImage = await phone.event('session.items')
+  assert.deepEqual((withImage.items as Array<Record<string, unknown>>)[0]!.attachments, [
+    { kind: 'image', attachmentId: imageId, bytes: big.byteLength, mediaType: 'image/png', width: 8, height: 8 },
+  ])
+  const firstChunk = await phone.call('attachment.read', { sessionId: 'sess-1', attachmentId: imageId })
+  const firstValue = firstChunk.value as { data: string; next: number }
+  assert.equal(firstValue.next, 1024 * 1024)
+  assert.equal(Buffer.from(firstValue.data, 'base64').byteLength, 1024 * 1024)
+  const secondChunk = await phone.call('attachment.read', { sessionId: 'sess-1', attachmentId: imageId, offset: firstValue.next })
+  const secondValue = secondChunk.value as { data: string; next?: number }
+  assert.equal(secondValue.next, undefined)
+  assert.equal(Buffer.from(secondValue.data, 'base64').byteLength, 32)
+
+  const fileId = `sha256:${'b'.repeat(64)}`
+  const fileData = Buffer.from('log line\n')
+  attachmentData.set(fileId, fileData)
+  followFeed.push({ type: 'event', event: { type: 'tool/result', seq: 31, time: 401, data: { turn: 2, step: 1, message: {
+    id: 'm31', role: 'tool', toolCallId: 'call-att', content: [
+      { type: 'file', attachment: { attachmentId: fileId, name: 'run.log', bytes: fileData.byteLength } },
+    ],
+  } } } })
+  const withFile = await phone.event('session.items')
+  assert.deepEqual((withFile.items as Array<Record<string, unknown>>)[0]!.attachments, [
+    { kind: 'file', attachmentId: fileId, name: 'run.log', bytes: fileData.byteLength },
+  ])
+  const fileRead = await phone.call('attachment.read', { sessionId: 'sess-1', attachmentId: fileId })
+  assert.equal(Buffer.from((fileRead.value as { data: string }).data, 'base64').toString(), 'log line\n')
+
+  // A Session cannot read bytes for an attachment its log never named.
+  const unknown = await phone.call('attachment.read', { sessionId: 'sess-1', attachmentId: `sha256:${'c'.repeat(64)}` })
+  assert.equal(unknown.ok, false)
+  assert.equal((unknown.error as { code: string }).code, 'duo/not-found')
+
+  // The reply that follows the attachments is still the one a finished turn announces.
+  followFeed.push({ type: 'event', event: { type: 'assistant/message', seq: 32, time: 402, data: { turn: 2, step: 2, stream: [], message: {
+    id: 'm32', role: 'assistant', content: [{ type: 'text', text: 'Found it.' }],
+  } } } })
+  const restored = await phone.event('session.items')
+  assert.equal((restored.items as Array<Record<string, unknown>>)[0]!.text, 'Found it.')
 
   // Mode switching.
   const preset = await phone.call('session.preset', { sessionId: 'sess-1', preset: 'cordis' })

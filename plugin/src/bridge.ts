@@ -5,18 +5,18 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { open as openFile, readdir, stat } from 'node:fs/promises'
-import { homedir, hostname } from 'node:os'
+import { appendFile, mkdtemp, open as openFile, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { homedir, hostname, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { Sealer, relayAuth } from './crypto.ts'
 import { Directory, type QuestionView, type SessionView } from './directory.ts'
-import type { ApprovalOutcome, ApprovalRequestEvent, AskUserQuestionAnswer, AskUserQuestionRequestEvent, HostContext } from './host.ts'
+import type { ApprovalOutcome, ApprovalRequestEvent, AskUserQuestionAnswer, AskUserQuestionRequestEvent, Attachments, HostContext } from './host.ts'
 import { loadPairing, pairingLink, pairingPath, pairingSvg, rotatePairing, savePairing, type Pairing } from './pairing.ts'
 import { Phones } from './phones.ts'
 import { RelayLink } from './relay.ts'
 import { ApnsSender, DeviceTokens, http2Transport, loadApns, type ApnsTransport, type PushMessage } from './push.ts'
 import { Remote, RemoteFailure, failureOf } from './remote.ts'
-import { LiveReducer, Transcript, type Item, type WireEvent } from './transcript.ts'
+import { LiveReducer, Transcript, type AttachmentRef, type Item, type WireEvent } from './transcript.ts'
 
 export const VERSION = '0.1.0'
 
@@ -24,6 +24,17 @@ export const VERSION = '0.1.0'
 const MAX_READ_BYTES = 2 * 1024 * 1024
 /** Most entries `fs.read` lists for a folder. */
 const MAX_FOLDER_ENTRIES = 1000
+/** Raw attachment bytes one `attachment.read` frame carries: encoded twice, it stays well under the 4 MB relay frame. */
+const ATTACHMENT_CHUNK_BYTES = 1024 * 1024
+/** Raw bytes one `attachment.upload` frame may carry. */
+const MAX_UPLOAD_CHUNK_BYTES = 1_500_000
+/** Ceiling for one uploaded file; images are held to dsh's own image limit. */
+const MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+/** An upload abandoned mid-way (the phone went away) is dropped after this long. */
+const UPLOAD_TTL_MS = 30 * 60_000
+/** Concurrent staged uploads across every device. */
+const MAX_UPLOADS = 64
+const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
 export interface BridgeConfig {
   readonly relay: string
@@ -95,6 +106,22 @@ interface HeldQuestion {
   readonly resolve: (answer: AskUserQuestionAnswer) => void
 }
 
+/** One attachment arriving in chunks from a phone, parked on disk until its prompt sends. */
+interface StagedUpload {
+  readonly uploadId: string
+  readonly device: string
+  readonly sessionId: string
+  readonly kind: 'image' | 'file'
+  readonly name: string
+  readonly mediaType?: string
+  /** A private directory holding exactly one file, so discarding is one removal. */
+  readonly dir: string
+  readonly path: string
+  bytes: number
+  done: boolean
+  createdAt: number
+}
+
 export class Bridge {
   private readonly ctx: HostContext
   private readonly config: BridgeConfig
@@ -105,6 +132,7 @@ export class Bridge {
   private readonly follows = new Map<string, Follow>()
   private readonly opened = new Map<string, Set<string>>()
   private readonly held = new Map<string, HeldQuestion>()
+  private readonly uploads = new Map<string, StagedUpload>()
   private readonly announced = new Set<string>()
   private readonly finishing = new Set<string>()
   private pairing!: Pairing
@@ -595,9 +623,24 @@ export class Bridge {
         this.release(str(m.sessionId, 'sessionId'), device)
         this.opened.get(device)?.delete(m.sessionId as string)
         return null
-      case 'session.prompt':
-        return await this.prompt(str(m.sessionId, 'sessionId'), str(m.text, 'text'),
-          m.mode === 'steer' ? 'steer' : 'queue', typeof m.timeZone === 'string' ? m.timeZone : undefined)
+      case 'session.prompt': {
+        const text = typeof m.text === 'string' ? m.text : ''
+        const uploads = Array.isArray(m.uploads)
+          ? m.uploads.filter((id): id is string => typeof id === 'string')
+          : []
+        if (text.trim() === '' && uploads.length === 0) {
+          throw new RemoteFailure('duo/bad-request', 'A message needs text or an attachment')
+        }
+        return await this.prompt(device, str(m.sessionId, 'sessionId'), text,
+          m.mode === 'steer' ? 'steer' : 'queue', typeof m.timeZone === 'string' ? m.timeZone : undefined, uploads)
+      }
+      case 'attachment.upload':
+        return await this.upload(device, m)
+      case 'attachment.discard':
+        this.discardUpload(device, str(m.uploadId, 'uploadId'))
+        return null
+      case 'attachment.read':
+        return await this.readAttachment(m)
       case 'session.cancel':
         await this.cancel(str(m.sessionId, 'sessionId'))
         return null
@@ -746,42 +789,249 @@ export class Bridge {
     }
   }
 
-  private async prompt(sessionId: string, text: string, mode: 'queue' | 'steer', timeZone: string | undefined) {
-    const line = text.trim()
-    if (line.startsWith('/')) {
-      const execution = await this.remote.call<{ result?: { kind: string; text?: string } } | undefined>(
-        'commands/execute', sessionId, line, [])
-      if (execution !== undefined && execution !== null) {
-        if (execution.result?.kind === 'error') {
-          throw new RemoteFailure('duo/command-failed', execution.result.text ?? 'Command failed')
+  /**
+   * Send one composer submission. Attachments were parked on disk by `attachment.upload`;
+   * images ride the prompt as dsh's encoded image parts, and files become dsh file-upload
+   * receipts, so the durable log ends up with the same references the Web client writes.
+   */
+  private async prompt(
+    device: string,
+    sessionId: string,
+    text: string,
+    mode: 'queue' | 'steer',
+    timeZone: string | undefined,
+    uploadIds: string[],
+  ) {
+    const attachments = await this.stagedContent(device, sessionId, uploadIds)
+    let sent = false
+    try {
+      const line = text.trim()
+      const content: Json[] = line === '' ? [] : [{ type: 'text', text }]
+      content.push(...attachments)
+      if (content.length === 0) throw new RemoteFailure('duo/bad-request', 'A message needs text or an attachment')
+      if (line.startsWith('/')) {
+        const execution = await this.remote.call<{ result?: { kind: string; text?: string } } | undefined>(
+          'commands/execute', sessionId, line, attachments)
+        if (execution !== undefined && execution !== null) {
+          if (execution.result?.kind === 'error') {
+            throw new RemoteFailure('duo/command-failed', execution.result.text ?? 'Command failed')
+          }
+          sent = true
+          return { kind: 'command', text: execution.result?.text }
         }
-        return { kind: 'command', text: execution.result?.text }
       }
-    }
-    const session = this.directory.view(sessionId)
-    if (session?.subagent !== undefined) {
-      if (session.subagent.mode !== 'continuable' || session.parentId === undefined) {
-        throw new RemoteFailure('duo/read-only', 'This subagent finished its task, so its conversation is read-only')
+      const session = this.directory.view(sessionId)
+      if (session?.subagent !== undefined) {
+        if (session.subagent.mode !== 'continuable' || session.parentId === undefined) {
+          throw new RemoteFailure('duo/read-only', 'This subagent finished its task, so its conversation is read-only')
+        }
+        if (attachments.some(part => part.type === 'file')) {
+          throw new RemoteFailure('duo/unsupported', 'Subagent conversations accept images, not files')
+        }
+        await this.remote.call('subagents/prompt', {
+          requestId: randomUUID(),
+          parentSessionId: session.parentId,
+          childSessionId: sessionId,
+          mode: 'continuable',
+          delivery: mode,
+          content,
+          ...timeZone === undefined ? {} : { clientTimeZone: timeZone },
+        })
+        sent = true
+        return { kind: 'prompt' }
       }
-      await this.remote.call('subagents/prompt', {
+      await this.remote.call('session/prompt', {
         requestId: randomUUID(),
-        parentSessionId: session.parentId,
-        childSessionId: sessionId,
-        mode: 'continuable',
-        delivery: mode,
-        content: [{ type: 'text', text }],
+        sessionId,
+        mode,
+        content,
         ...timeZone === undefined ? {} : { clientTimeZone: timeZone },
       })
+      sent = true
       return { kind: 'prompt' }
+    } finally {
+      // A failed send keeps the staged bytes, so the phone can retry with the same upload ids.
+      if (sent) for (const uploadId of uploadIds) this.discardUpload(device, uploadId)
     }
-    await this.remote.call('session/prompt', {
-      requestId: randomUUID(),
-      sessionId,
-      mode,
-      content: [{ type: 'text', text }],
-      ...timeZone === undefined ? {} : { clientTimeZone: timeZone },
-    })
-    return { kind: 'prompt' }
+  }
+
+  /** Turn this device's finished uploads into dsh prompt parts, in the order they were attached. */
+  private async stagedContent(device: string, sessionId: string, uploadIds: string[]): Promise<Json[]> {
+    const parts: Json[] = []
+    for (const uploadId of uploadIds) {
+      const upload = this.uploads.get(uploadId)
+      if (upload === undefined || upload.device !== device) {
+        throw new RemoteFailure('duo/bad-request', 'That attachment is no longer available; attach it again')
+      }
+      if (upload.sessionId !== sessionId) throw new RemoteFailure('duo/bad-request', 'That attachment belongs to another session')
+      if (!upload.done) throw new RemoteFailure('duo/bad-request', 'That attachment has not finished uploading')
+      const data = await readFile(upload.path)
+      if (upload.kind === 'image') {
+        parts.push({
+          type: 'image',
+          mediaType: upload.mediaType,
+          data: data.toString('base64'),
+          name: upload.name,
+        })
+      } else {
+        const stored = await this.remote.call<{ receiptId: string }>('fileUploads/upload', sessionId, {
+          data: data.toString('base64'),
+          name: upload.name,
+        })
+        parts.push({ type: 'file', receiptId: stored.receiptId })
+      }
+    }
+    return parts
+  }
+
+  /**
+   * Take one attachment in chunks. The first call creates a private staging directory; each
+   * later call names the upload id it returned. A prompt consumes the finished upload.
+   */
+  private async upload(device: string, m: Json): Promise<Json> {
+    this.sweepUploads()
+    const data = canonicalBase64(m.data, 'data')
+    if (data.byteLength > MAX_UPLOAD_CHUNK_BYTES) {
+      throw new RemoteFailure('duo/bad-request', 'One upload chunk may be at most 1.5 MB')
+    }
+    const given = typeof m.uploadId === 'string' ? m.uploadId : undefined
+    let upload: StagedUpload
+    if (given === undefined) {
+      if (this.uploads.size >= MAX_UPLOADS) {
+        throw new RemoteFailure('duo/busy', 'Too many attachments are waiting; send or discard one first')
+      }
+      const kind = m.kind === 'image' ? 'image' as const : m.kind === 'file' ? 'file' as const : undefined
+      if (kind === undefined) throw new RemoteFailure('duo/bad-request', 'kind must be image or file')
+      const mediaType = typeof m.mediaType === 'string' ? m.mediaType.toLowerCase() : undefined
+      if (kind === 'image' && (mediaType === undefined || !IMAGE_MEDIA_TYPES.has(mediaType))) {
+        throw new RemoteFailure('duo/bad-request', 'Images must be PNG, JPEG, WebP or GIF')
+      }
+      const sessionId = str(m.sessionId, 'sessionId')
+      const dir = await mkdtemp(join(tmpdir(), 'dsh-duo-upload-'))
+      upload = {
+        uploadId: randomUUID(),
+        device,
+        sessionId,
+        kind,
+        name: safeName(typeof m.name === 'string' ? m.name : kind === 'image' ? 'image' : 'attachment'),
+        ...mediaType === undefined ? {} : { mediaType },
+        dir,
+        path: join(dir, 'data'),
+        bytes: 0,
+        done: false,
+        createdAt: Date.now(),
+      }
+    } else {
+      if (!/^[A-Za-z0-9_-]{8,80}$/.test(given)) throw new RemoteFailure('duo/bad-request', 'uploadId is invalid')
+      const found = this.uploads.get(given)
+      if (found === undefined || found.device !== device) {
+        throw new RemoteFailure('duo/not-found', 'That upload has expired; attach the file again')
+      }
+      if (found.done) throw new RemoteFailure('duo/bad-request', 'That attachment is already complete')
+      if (typeof m.offset === 'number' && m.offset !== found.bytes) {
+        throw new RemoteFailure('duo/bad-request', 'Attachment chunks must arrive in order')
+      }
+      upload = found
+    }
+    const limit = upload.kind === 'image'
+      ? this.ctx.get('attachments')?.imageLimits.maxImageBytes ?? 20 * 1024 * 1024
+      : MAX_UPLOAD_BYTES
+    if (upload.bytes + data.byteLength > limit) {
+      this.discardUpload(device, upload.uploadId)
+      throw new RemoteFailure('duo/too-large', `${upload.name} is over the ${Math.floor(limit / 1048576)} MB limit`)
+    }
+    if (data.byteLength > 0) await appendFile(upload.path, data)
+    upload.bytes += data.byteLength
+    if (m.done === true) {
+      if (upload.kind === 'image' && upload.bytes === 0) {
+        this.discardUpload(device, upload.uploadId)
+        throw new RemoteFailure('duo/bad-request', 'An image is empty')
+      }
+      upload.done = true
+    }
+    this.uploads.set(upload.uploadId, upload)
+    return { uploadId: upload.uploadId, received: upload.bytes, done: upload.done }
+  }
+
+  /** Forget a staged upload, whoever asks: its private directory goes with it. */
+  private discardUpload(device: string, uploadId: string): void {
+    const upload = this.uploads.get(uploadId)
+    if (upload === undefined || upload.device !== device) return
+    this.uploads.delete(uploadId)
+    void rm(upload.dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+
+  /** Drop uploads a phone abandoned (it backgrounded, or a send never came). */
+  private sweepUploads(): void {
+    const cutoff = Date.now() - UPLOAD_TTL_MS
+    for (const [id, upload] of this.uploads) {
+      if (upload.createdAt > cutoff) continue
+      this.uploads.delete(id)
+      void rm(upload.dir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
+  /**
+   * Read one image or file the Session's own log references, a chunk at a time, so even a
+   * large photo crosses the relay without exceeding one frame.
+   */
+  private async readAttachment(m: Json): Promise<Json> {
+    const sessionId = str(m.sessionId, 'sessionId')
+    const attachmentId = str(m.attachmentId, 'attachmentId')
+    const attachments = this.ctx.get('attachments')
+    if (attachments === undefined) throw new RemoteFailure('duo/unsupported', 'This Mac does not store attachments')
+    const ref = await this.findAttachment(sessionId, attachmentId)
+    if (ref === undefined) throw new RemoteFailure('duo/not-found', 'This session does not reference that attachment')
+    const offset = typeof m.offset === 'number' && Number.isInteger(m.offset) && m.offset >= 0 ? m.offset : 0
+    const wanted = typeof m.length === 'number' && Number.isInteger(m.length) && m.length > 0 ? m.length : ATTACHMENT_CHUNK_BYTES
+    const data = await this.attachmentChunk(attachments, ref, offset, Math.min(wanted, ATTACHMENT_CHUNK_BYTES))
+    const next = offset + data.byteLength < ref.bytes ? offset + data.byteLength : undefined
+    return {
+      attachment: ref,
+      offset,
+      data: data.toString('base64'),
+      ...next === undefined ? {} : { next },
+    }
+  }
+
+  /** The stored bytes of one attachment, through its host file when the backend exposes one. */
+  private async attachmentChunk(attachments: Attachments, ref: AttachmentRef, offset: number, length: number): Promise<Buffer> {
+    if (offset >= ref.bytes || length === 0) return Buffer.alloc(0)
+    const hostPath = ref.kind === 'image' ? attachments.imageHostPath(ref) : attachments.fileHostPath(ref)
+    if (hostPath !== undefined) {
+      const handle = await openFile(hostPath, 'r').catch((error: NodeJS.ErrnoException) => {
+        throw new RemoteFailure(error.code === 'ENOENT' ? 'duo/not-found' : 'duo/unreadable',
+          error.code === 'ENOENT' ? 'That attachment is no longer on this Mac' : `Can't read that attachment (${error.code ?? error.message})`)
+      })
+      try {
+        const size = Math.min(length, Math.max(0, ref.bytes - offset))
+        const buffer = Buffer.alloc(size)
+        let read = 0
+        while (read < size) {
+          const result = await handle.read(buffer, read, size - read, offset + read)
+          if (result.bytesRead === 0) break
+          read += result.bytesRead
+        }
+        return buffer.subarray(0, read)
+      } finally {
+        await handle.close()
+      }
+    }
+    // A backend without host files: read the object whole, then take this chunk from it.
+    const whole = ref.kind === 'image'
+      ? Buffer.from((await attachments.readImage(ref)).data)
+      : Buffer.from(await collect(attachments.readFileStream(ref)))
+    return whole.subarray(offset, Math.min(offset + length, whole.byteLength))
+  }
+
+  /** The attachment record this Session's log names, the authorization for a byte read. */
+  private async findAttachment(sessionId: string, attachmentId: string): Promise<AttachmentRef | undefined> {
+    const follow = this.follows.get(sessionId)
+    if (follow !== undefined) {
+      await follow.ready
+      return follow.transcript.attachment(attachmentId)
+    }
+    return (await this.transcriptFor(sessionId)).attachment(attachmentId)
   }
 
   /** Stop a normal turn, or interrupt a continuable child through its exact parent address. */
@@ -934,6 +1184,7 @@ export class Bridge {
         description: command.description ?? '',
         kind: 'command',
         ...typeof input?.hint === 'string' ? { hint: input.hint } : {},
+        ...input?.attachments === true ? { attachments: true } : {},
       })
     }
     return [...rows.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)))
@@ -1124,6 +1375,40 @@ const APPROVAL_DENY = 'Deny'
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
+}
+
+/** Decode a wire base64 field, rejecting the non-canonical forms the Host's validators refuse. */
+function canonicalBase64(value: unknown, name: string): Buffer {
+  if (typeof value !== 'string') throw new RemoteFailure('duo/bad-request', `${name} must be base64`)
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.toString('base64') !== value) throw new RemoteFailure('duo/bad-request', `${name} is not canonical base64`)
+  return bytes
+}
+
+/** A display name stripped of anything that could be read as a path or break a log line. */
+function safeName(value: string): string {
+  const leaf = basename(value.replace(/\\/g, '/'))
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/^\.+/, '')
+    .trim()
+  return leaf === '' ? 'attachment' : leaf.slice(0, 120)
+}
+
+/** Concatenate a streamed attachment backend's chunks. */
+async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+  const parts: Uint8Array[] = []
+  let total = 0
+  for await (const chunk of chunks) {
+    parts.push(chunk)
+    total += chunk.byteLength
+  }
+  const joined = new Uint8Array(total)
+  let at = 0
+  for (const part of parts) {
+    joined.set(part, at)
+    at += part.byteLength
+  }
+  return joined
 }
 
 function toQuestionView(callId: string, request: AskUserQuestionRequestEvent): QuestionView {

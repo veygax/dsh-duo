@@ -11,7 +11,8 @@
  * surfaces are visible without real dsh.
  */
 
-import { mkdtemp } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -74,7 +75,41 @@ interface DemoSession {
   parentId?: string
   subagent?: Json
   /** Prompts sent with mode "queue" during a turn; each runs as its own turn afterwards. */
-  queued?: string[]
+  queued?: Array<{ prompt: string; content: Json[] }>
+}
+
+type DemoAttachment = {
+  readonly attachmentId: string
+  readonly kind: 'image' | 'file'
+  readonly name: string
+  readonly mediaType?: string
+  readonly data: Buffer
+  readonly width?: number
+  readonly height?: number
+}
+
+/** Durable attachments this demo Host serves back to the phone, by content id. */
+const attachments = new Map<string, DemoAttachment>()
+/** In-flight uploads from the phone, assembled from chunks. */
+const uploads = new Map<string, { sessionId: string; kind: 'image' | 'file'; name: string; mediaType?: string; data: Buffer; done: boolean }>()
+/** File receipts handed to a prompt after a file upload. */
+const receipts = new Map<string, string>()
+
+function storeAttachment(input: { kind: 'image' | 'file'; name: string; mediaType?: string; data: Buffer; width?: number; height?: number }): DemoAttachment {
+  const attachmentId = `sha256:${randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64)}`
+  const attachment: DemoAttachment = { attachmentId, ...input }
+  attachments.set(attachmentId, attachment)
+  return attachment
+}
+
+function publicRef(attachment: DemoAttachment): Json {
+  return {
+    attachmentId: attachment.attachmentId,
+    name: attachment.name,
+    ...attachment.kind === 'image'
+      ? { mediaType: attachment.mediaType, bytes: attachment.data.length, width: attachment.width ?? 4, height: attachment.height ?? 3 }
+      : { bytes: attachment.data.length },
+  }
 }
 
 const now = Date.now()
@@ -96,13 +131,27 @@ function ev(type: string, data: Json, time = now - 3_600_000): Json {
   return { type, seq: seq++, time, data }
 }
 const user = (text: string): Json => ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] })
+const userContent = (content: Json[]): Json => ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user' }, content })
 const assistant = (turn: number, blocks: Json[]): Json => ev('assistant/message', { turn, step: 1, stream: [], message: { id: `m${seq}`, role: 'assistant', content: blocks } })
 const result = (turn: number, callId: string, text: string, isError = false): Json =>
   ev('tool/result', { turn, step: 1, message: { id: `m${seq}`, role: 'tool', toolCallId: callId, isError, content: [{ type: 'text', text }] } })
 
+// One real image and one text file, so the app's attachment rendering has something to show.
+const screenshot = await readFile(new URL('../../docs/images/session.png', import.meta.url))
+const screenshotAttachment = storeAttachment({ kind: 'image', name: 'session.png', mediaType: 'image/png', data: screenshot, width: 687, height: 1000 })
+const specAttachment = storeAttachment({
+  kind: 'file', name: 'login.spec.ts',
+  data: Buffer.from("test('redirects to dashboard', async ({ page }) => {\n  await page.click('text=Sign in')\n  await page.goto('/dashboard')\n})\n"),
+})
+
 session('s-login', 'Fix flaky login test', '/Users/dev/Code/webapp', 4, 'standard', [
   ev('turn/start', { turn: 1 }),
   user('The login e2e test fails about one run in five. Can you find out why?'),
+  userContent([
+    { type: 'text', text: 'Here is the screenshot of the failure and the spec I ran.' },
+    { type: 'image', attachment: publicRef(screenshotAttachment) },
+    { type: 'file', attachment: publicRef(specAttachment) },
+  ]),
   assistant(1, [
     { type: 'reasoning', text: 'Intermittent failure → likely a race. Check how the test waits for the session cookie before navigating.' },
     { type: 'text', text: "I'll look at the test and the auth flow first." },
@@ -149,6 +198,23 @@ session('s-files', 'Review the protocol docs', new URL('../..', import.meta.url)
   user('Where is the phone protocol documented?'),
   assistant(1, [{ type: 'text', text: 'It lives in [PROTOCOL.md](docs/PROTOCOL.md:88), next to the [README](README.md). The bridge that answers it is [bridge.ts](plugin/src/bridge.ts), with the rest of the plugin in [plugin/src](plugin/src), and the app icon is [icon.json](ios/App/AppIcon.icon/icon.json).' }]),
   ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+])
+
+// Attachment-only conversations, for the app's image, file and composer rendering.
+session('s-attach', 'Review the login evidence', '/Users/dev/Code/webapp', 1, 'standard', [
+  ev('turn/start', { turn: 1 }),
+  userContent([
+    { type: 'text', text: 'Here is the screenshot and the spec from the failing run.' },
+    { type: 'image', attachment: publicRef(screenshotAttachment) },
+    { type: 'file', attachment: publicRef(specAttachment) },
+  ]),
+])
+session('s-photo', 'Look at this screenshot', '/Users/dev/Code/webapp', 2, 'standard', [
+  ev('turn/start', { turn: 1 }),
+  userContent([
+    { type: 'text', text: 'Does this look right?' },
+    { type: 'image', attachment: publicRef(screenshotAttachment) },
+  ]),
 ])
 
 // Longer than one follow window, so the phone has to page back to its first message.
@@ -240,7 +306,7 @@ async function stream(id: string, attemptId: string, kind: 'reasoning-delta' | '
   }
 }
 
-async function runTurn(id: string, prompt: string): Promise<void> {
+async function runTurn(id: string, prompt: string, content?: Json[]): Promise<void> {
   const entry = sessions.get(id)!
   const turn = ++entry.turn
   entry.summary = { ...entry.summary, running: true, blank: false, updatedAt: Date.now() }
@@ -251,7 +317,7 @@ async function runTurn(id: string, prompt: string): Promise<void> {
   emit('api-session/activity', id, Date.now())
   emit('api-session/status', id, true)
   append(id, ev('turn/start', { turn }, Date.now()))
-  append(id, ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: prompt }] }, Date.now()))
+  append(id, ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user' }, content: content ?? [{ type: 'text', text: prompt }] }, Date.now()))
   await sleep(400)
 
   const thinking = `The user wants: "${prompt.slice(0, 80)}". I'll inspect the repository, then answer concisely.`
@@ -302,7 +368,7 @@ async function runTurn(id: string, prompt: string): Promise<void> {
   entry.summary = { ...entry.summary, running: false, updatedAt: Date.now() }
   emit('api-session/status', id, false)
   const next = entry.queued?.shift()
-  if (next !== undefined) void runTurn(id, next)
+  if (next !== undefined) void runTurn(id, next.prompt, next.content)
 }
 
 const catalog = {
@@ -391,8 +457,9 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
     case 'subagents/prompt': {
       const prompt = (request.args.request ?? {}) as Json
       const id = String(prompt.childSessionId)
-      const content = (prompt.content as Json[])[0]!
-      void runTurn(id, String(content.text))
+      const content = Array.isArray(prompt.content) ? prompt.content as Json[] : []
+      const text = content.find(part => part.type === 'text')?.text
+      void runTurn(id, typeof text === 'string' ? text : 'Shared an attachment.', content)
       return { messageId: `msg-${seq}` }
     }
     case 'subagents/interruptByParent': {
@@ -419,24 +486,84 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
       return { title: req.title, seq }
     }
     case 'session/prompt': {
-      const content = (req.content as Json[])[0]!
-      const id = String(req.sessionId), text = String(content.text)
+      const id = String(req.sessionId)
+      const parts = Array.isArray(req.content) ? req.content as Json[] : []
+      // Like dsh, admit what came off the wire into durable content blocks the transcript can show.
+      const content = parts.map((part) => {
+        if (part.type === 'image' && typeof part.data === 'string') {
+          const stored = storeAttachment({
+            kind: 'image', name: typeof part.name === 'string' ? part.name : 'image.png',
+            mediaType: typeof part.mediaType === 'string' ? part.mediaType : 'image/png',
+            data: Buffer.from(part.data, 'base64'),
+          })
+          return { type: 'image', attachment: publicRef(stored) }
+        }
+        if (part.type === 'file' && typeof part.receiptId === 'string') {
+          const stored = attachments.get(receipts.get(part.receiptId) ?? '')
+          return stored === undefined ? part : { type: 'file', attachment: publicRef(stored) }
+        }
+        return part
+      })
+      const text = content.find(part => part.type === 'text')?.text
+      const prompt = typeof text === 'string' ? text : 'Shared an attachment.'
       const entry = sessions.get(id)!
       // Like dsh: a steer joins the running turn at its next step, a queued prompt waits for the turn to end.
       if (entry.summary.running === true && req.mode === 'steer') {
-        setTimeout(() => append(id, ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user-rpc' }, content: [{ type: 'text', text }] }, Date.now())), 1500)
+        setTimeout(() => append(id, ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user-rpc' }, content }, Date.now())), 1500)
       } else if (entry.summary.running === true) {
-        (entry.queued ??= []).push(text)
+        (entry.queued ??= []).push({ prompt, content })
       } else {
-        void runTurn(id, text)
+        void runTurn(id, prompt, content)
       }
       return { accepted: true }
+    }
+    case 'fileUploads/upload': {
+      const body = request.args.request as Json
+      const stored = storeAttachment({
+        kind: 'file', name: typeof body.name === 'string' ? body.name : 'attachment',
+        data: Buffer.from(String(body.data ?? ''), 'base64'),
+      })
+      const receiptId = `receipt-${receipts.size + 1}`
+      receipts.set(receiptId, stored.attachmentId)
+      return { receiptId, file: { attachmentId: stored.attachmentId, name: stored.name, bytes: stored.data.length } }
+    }
+    case 'attachment.upload': {
+      const uploadId = typeof request.args.uploadId === 'string' ? request.args.uploadId : `up-${randomUUID()}`
+      let upload = uploads.get(uploadId)
+      if (upload === undefined) {
+        upload = {
+          sessionId: String(request.args.sessionId),
+          kind: request.args.kind === 'image' ? 'image' : 'file',
+          name: String(request.args.name ?? 'attachment'),
+          ...typeof request.args.mediaType === 'string' ? { mediaType: request.args.mediaType } : {},
+          data: Buffer.alloc(0),
+          done: false,
+        }
+        uploads.set(uploadId, upload)
+      }
+      upload.data = Buffer.concat([upload.data, Buffer.from(String(request.args.data ?? ''), 'base64')])
+      upload.done = request.args.done === true
+      return { uploadId, received: upload.data.length, done: upload.done }
+    }
+    case 'attachment.discard': {
+      uploads.delete(String(request.args.uploadId))
+      return null
+    }
+    case 'attachment.read': {
+      const stored = attachments.get(String(request.args.attachmentId))
+      if (stored === undefined) throw Object.assign(new Error('That attachment is not on this Mac'), { code: 'duo/not-found' })
+      const offset = Number(request.args.offset ?? 0)
+      const length = Math.min(Number(request.args.length ?? 1_048_576), 1_048_576)
+      const data = stored.data.subarray(offset, offset + length)
+      const next = offset + data.length < stored.data.length ? offset + data.length : undefined
+      return { attachment: publicRef(stored), offset, data: data.toString('base64'), ...next === undefined ? {} : { next } }
     }
     case 'session/cancel': return { accepted: true }
     case 'commands/list': return [
       { name: 'compact', description: 'Summarize older history to free context' },
       { name: 'clear', description: 'Start over in a fresh context' },
       { name: 'goal', description: 'Set a goal DeepSeek keeps working toward', input: { hint: '<objective>' } },
+      { name: 'review', description: 'Review the files you attach', input: { hint: '<path>', attachments: true } },
       { name: 'duo-pair', description: 'Show DSH Duo pairing status' },
     ]
     case 'skills/list': return { skills: [
@@ -515,7 +642,23 @@ const ctx: HostContext = {
   },
   connection: { createPeer: () => ({ id: 'demo', signal: new AbortController().signal, dispose: async () => {} }) },
   logger: { info: (message: unknown) => console.log(String(message)), warn: (message: unknown) => console.warn(String(message)) },
-  get: ((name: string) => name === 'profileContext' ? { home } : undefined) as HostContext['get'],
+  get: ((name: string) => {
+    if (name === 'profileContext') return { home }
+    if (name === 'attachments') {
+      return {
+        imageLimits: { maxImageBytes: 20 * 1024 * 1024, maxImagesPerMessage: 20, maxMessageImageBytes: 200 * 1024 * 1024, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
+        readImage: async (ref: { attachmentId: string }) => ({ ref, data: attachments.get(String(ref.attachmentId))?.data ?? new Uint8Array() }),
+        imageHostPath: () => undefined,
+        fileHostPath: () => undefined,
+        readFileStream: async function* (ref: { attachmentId: string }) {
+          const stored = attachments.get(String(ref.attachmentId))
+          if (stored !== undefined) yield stored.data
+        },
+        isAttachmentError: () => false,
+      }
+    }
+    return undefined
+  }) as HostContext['get'],
   on(event, listener) {
     const list = listeners.get(event) ?? []
     list.push(listener)

@@ -34,6 +34,8 @@ struct MarkdownText: View {
                     CodeBlock(code: code, language: language)
                 case .table(let table):
                     TableBlock(table: table, cell: inline)
+                case .image(let alt, let source):
+                    MarkdownImageView(alt: alt, source: source)
                 case .rule:
                     Divider()
                 }
@@ -56,6 +58,7 @@ struct MarkdownText: View {
         case quote(String)
         case code(String?, String)
         case table(Table)
+        case image(String, String)
         case rule
     }
 
@@ -137,6 +140,12 @@ struct MarkdownText: View {
             }
             if code != nil {
                 code?.append(raw)
+                continue
+            }
+            // A line that is one image is drawn as a picture, not as its Markdown.
+            if let image = line.firstMatch(of: /^!\[([^\]]*)\]\(([^)]+)\)$/) {
+                flush()
+                blocks.append(.image(String(image.1), String(image.2)))
                 continue
             }
             // A table is a `|` row followed by a `|---|` separator row.

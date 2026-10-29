@@ -89,8 +89,8 @@ final class SessionModel: Identifiable {
         if let tools = try? delta["tools"]?.decode([LiveTool].self) { live?.tools = tools }
     }
 
-    func addPending(_ text: String, steer: Bool) -> PendingMessage.ID {
-        let message = PendingMessage(text: text, steer: steer)
+    func addPending(_ text: String, steer: Bool, attachments: [PendingAttachment] = []) -> PendingMessage.ID {
+        let message = PendingMessage(text: text, steer: steer, attachments: attachments)
         pending.append(message)
         return message.id
     }
@@ -103,7 +103,9 @@ final class SessionModel: Identifiable {
     private func settlePending(_ incoming: [TranscriptItem]) {
         guard !pending.isEmpty else { return }
         for item in incoming where item.kind == .user {
-            if let match = pending.firstIndex(where: { $0.text == item.text }) { pending.remove(at: match) }
+            if let match = pending.firstIndex(where: {
+                $0.text == item.text && $0.attachments.count == (item.attachments?.count ?? 0)
+            }) { pending.remove(at: match) }
         }
     }
 
@@ -143,4 +145,6 @@ struct PendingMessage: Identifiable {
     let text: String
     /// Joins the running turn rather than waiting for it to end.
     let steer: Bool
+    /// What was attached; their thumbnails show until dsh records the message.
+    var attachments: [PendingAttachment] = []
 }

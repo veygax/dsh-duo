@@ -154,7 +154,8 @@ nonisolated struct TranscriptItem: Codable, Identifiable, Hashable, Sendable {
     var time: Double
     var text: String?
     var turn: Int?
-    var images: Int?
+    /// Images and files the row carries, in the order they were attached.
+    var attachments: [TranscriptAttachment]?
     var callId: String?
     var name: String?
     var args: String?
@@ -268,7 +269,10 @@ nonisolated struct SlashCommand: Codable, Hashable, Sendable, Identifiable {
     var description: String
     var hint: String?
     var kind: String
+    /// Whether the command takes images or files from the composer.
+    var attachments: Bool?
     var id: String { name }
+    var acceptsAttachments: Bool { attachments == true }
 }
 
 nonisolated struct DirectoryListing: Codable, Hashable, Sendable {

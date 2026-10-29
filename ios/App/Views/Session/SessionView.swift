@@ -48,6 +48,8 @@ struct SessionView: View {
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
+                    .environment(\.sessionId, sessionId)
+                    .environment(\.attachmentOpener, AttachmentOpener { attachment in preview(attachment) })
                     .environment(\.paneOpen, inspecting && inspectorShown)
                     .environment(\.inspector, inspecting
                         ? Inspector(selectedId: inspectorShown ? inspected?.id : nil, open: open)
@@ -151,6 +153,18 @@ struct SessionView: View {
             case .folder(let folder): picking = folder
             case nil: break
             }
+        }
+    }
+
+    /// Open an image or file a message carries: read its bytes from the Mac, then QuickLook it.
+    private func preview(_ attachment: TranscriptAttachment) {
+        guard fetching == nil else { return }
+        Haptics.tap()
+        fetching = attachment.displayName
+        Task {
+            let url = await store.attachmentFile(attachment, in: sessionId)
+            fetching = nil
+            if let url { previewed = url }
         }
     }
 

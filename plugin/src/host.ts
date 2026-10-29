@@ -90,6 +90,34 @@ export interface ApprovalRequestEvent {
 
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
+/** One durable attachment reference as dsh stores it (a subset of dsh-llm's block refs). */
+export interface AttachmentRef {
+  readonly attachmentId: string
+  readonly name?: string
+  readonly mediaType?: string
+  readonly bytes: number
+  readonly width?: number
+  readonly height?: number
+}
+
+/**
+ * The attachment store dsh mounts for uploaded images and files. The phone reads back the
+ * exact bytes a Session references, and locates host copies for chunked reads.
+ */
+export interface Attachments {
+  readonly imageLimits: {
+    readonly maxImageBytes: number
+    readonly maxImagesPerMessage: number
+    readonly maxMessageImageBytes: number
+    readonly mediaTypes: readonly string[]
+  }
+  readImage(ref: AttachmentRef, signal?: AbortSignal): Promise<{ ref: AttachmentRef; data: Uint8Array }>
+  imageHostPath(ref: AttachmentRef): string | undefined
+  fileHostPath(ref: AttachmentRef): string | undefined
+  readFileStream(ref: AttachmentRef, signal?: AbortSignal): AsyncIterable<Uint8Array>
+  isAttachmentError(error: unknown): boolean
+}
+
 /** Host Context as this plugin uses it. */
 export interface HostContext {
   readonly typertGateway: TypertGateway
@@ -97,6 +125,7 @@ export interface HostContext {
   readonly logger?: Logger | ((name: string) => Logger)
   get(name: 'typert'): TypertRegistry | undefined
   get(name: 'commands'): Commands | undefined
+  get(name: 'attachments'): Attachments | undefined
   get(name: 'profileContext'): { readonly home: string } | undefined
   get(name: string): unknown
   on(event: string, listener: (...args: never[]) => unknown, options?: { prepend?: boolean }): () => void

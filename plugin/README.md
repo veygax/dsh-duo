@@ -65,6 +65,9 @@ The QR code carries the room secret, so the plugin never writes it into a sessio
 - `session.prompt` that starts with `/` goes through `commands/execute` first, the same way the Web composer does.
   A prompt to a continuable subagent goes through `subagents/prompt` with its exact parent address; Stop uses
   `subagents/interruptByParent`. A finished one-shot child is rejected as read-only.
+- Takes images and files from the phone in relay-sized chunks (`attachment.upload`), admits them as dsh image content
+  and file-upload receipts, and serves a message's stored bytes back for history (`attachment.read`). Attachments the
+  Session's log references are the only ones it will read.
 
 ## Develop
 
@@ -75,4 +78,5 @@ node dev/demo-host.ts --relay http://127.0.0.1:8787
 ```
 
 `npm test` is an end-to-end test: the real relay, this plugin on a fake Host, and a simulated phone. The demo Host
-simulates dsh for app development without a DeepSeek key.
+simulates dsh for app development without a DeepSeek key; its login and attachment sessions carry a real screenshot
+and a text file, and it accepts the images and files you send from the phone.

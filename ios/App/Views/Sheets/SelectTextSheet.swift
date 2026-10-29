@@ -101,6 +101,10 @@ struct SelectTextSheet: View {
                     if index > 0 { paragraph.append(NSAttributedString(string: "\n")) }
                     paragraph.append(inline(row.joined(separator: "\t"), font: index == 0 ? body.bold : body))
                 }
+            case .image(let alt, let source):
+                paragraph = NSMutableAttributedString(string: alt.isEmpty ? source : alt, attributes: [
+                    .font: body, .foregroundColor: UIColor.secondaryLabel,
+                ])
             case .rule:
                 paragraph = NSMutableAttributedString(string: "———", attributes: [
                     .font: body, .foregroundColor: UIColor.tertiaryLabel,

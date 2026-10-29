@@ -20,6 +20,7 @@
 		3228B3853B228943B75D3F80 /* DuoCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED92AE61B24458488741F75D /* DuoCrypto.swift */; };
 		3914D7496D121C18D6027BC2 /* DSHDuoNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D6CC76C18373C0747D4EFE25 /* DSHDuoNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		39351F61912BC2FFBA76C814 /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398F723FF55C9BCFBBE97519 /* PairingStore.swift */; };
+		3C4856AF1735F01CFEC02D91 /* AttachmentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD9108F44453347A4D5D719D /* AttachmentCache.swift */; };
 		43FC4A48B8F4D08272381431 /* ItemViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4614BDF2C92334DC5EC9D83 /* ItemViews.swift */; };
 		45DFEB1B9F353EC48D8C3B3C /* SelectTextSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338C4E47FB1EAE43FDD05726 /* SelectTextSheet.swift */; };
 		4BC1185B00D9D2EC39561038 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8ED8525A7E7B1625F5576F1 /* SessionModel.swift */; };
@@ -35,6 +36,7 @@
 		91B7B7384A2ED12407DF97ED /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EACB8C47C1FBB714E82B80B /* JSONValue.swift */; };
 		9437A6FED8D486FDB5E1AE88 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8EEE2F95E3A6637EF8E757A /* PairingView.swift */; };
 		988704D34B3195596F14E2AE /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D594302B722D7E193A46A3 /* PushPayload.swift */; };
+		9BA6C23A57C4EC0BF583A400 /* AttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2E1B12809189140588BD0C /* AttachmentViews.swift */; };
 		A159F20D5ACA90F41D1BB364 /* FolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE8729C9020E5E0C01FC837C /* FolderPicker.swift */; };
 		A2186B8C1AC54F072052FDE5 /* MessageNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B79F5CD7CE78A02BDADACA6 /* MessageNotification.swift */; };
 		ADBA69FDA5CCD92BF335E8DF /* PromptCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E7E0AC9CA46CC59169DCF5 /* PromptCard.swift */; };
@@ -44,6 +46,7 @@
 		C2D7D17735DC1AB7A0E455E5 /* PushEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */; };
 		C2F332D691F6FDF6222313FF /* Modes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453A60DAD6812DA45F24B916 /* Modes.swift */; };
 		C80B01E3719CA8C3830D6ADA /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4B6FE651B773D4D13315B49 /* SidebarView.swift */; };
+		D1F3CA4EE2AE153325EDBAAC /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8217C084E75AA5828ABFA914 /* Attachments.swift */; };
 		D7060494C2F49894DE027C05 /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A5D605C2EC1AF5105D8B98 /* Menus.swift */; };
 		D7E89D346E2DC2A6EC946269 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBD7BF708D121970A5BA6A2 /* Models.swift */; };
 		DB8053D6FB971CF4CD518EDF /* PushEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */; };
@@ -107,11 +110,14 @@
 		7167FE20E3402F1EA60CBF1E /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		77894D5E9ECF92819C08704F /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		77EA4FDE575A162AD00B83C7 /* SessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionView.swift; sourceTree = "<group>"; };
+		8217C084E75AA5828ABFA914 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
+		8F2E1B12809189140588BD0C /* AttachmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentViews.swift; sourceTree = "<group>"; };
 		90042447D96349F6539BEB69 /* DSHDuoTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DSHDuoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		94D594302B722D7E193A46A3 /* PushPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushPayload.swift; sourceTree = "<group>"; };
 		9751642E78B9CCD05F8E67BB /* HostStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostStore.swift; sourceTree = "<group>"; };
 		9EAA961BE1C00950272CADE3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A6A5D605C2EC1AF5105D8B98 /* Menus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Menus.swift; sourceTree = "<group>"; };
+		AD9108F44453347A4D5D719D /* AttachmentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentCache.swift; sourceTree = "<group>"; };
 		AE8729C9020E5E0C01FC837C /* FolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPicker.swift; sourceTree = "<group>"; };
 		B1E7E0AC9CA46CC59169DCF5 /* PromptCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptCard.swift; sourceTree = "<group>"; };
 		B8ED8525A7E7B1625F5576F1 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
@@ -207,6 +213,7 @@
 		7E936E651902DBF56F392401 /* Session */ = {
 			isa = PBXGroup;
 			children = (
+				8F2E1B12809189140588BD0C /* AttachmentViews.swift */,
 				57F83951A91E7178FE4F4FE7 /* ComposerView.swift */,
 				DCEA930A7B1ED75196A172AD /* ConversationView.swift */,
 				65F6BB29DAD01D9463DA88BA /* DetailPane.swift */,
@@ -245,6 +252,7 @@
 		98E74790EDD1865699392A15 /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				8217C084E75AA5828ABFA914 /* Attachments.swift */,
 				3EACB8C47C1FBB714E82B80B /* JSONValue.swift */,
 				FEBD7BF708D121970A5BA6A2 /* Models.swift */,
 				453A60DAD6812DA45F24B916 /* Modes.swift */,
@@ -263,6 +271,7 @@
 		A686B42C89889A1D500460D6 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				AD9108F44453347A4D5D719D /* AttachmentCache.swift */,
 				CFA74144E5F2CBBB976AA969 /* Haptics.swift */,
 				9751642E78B9CCD05F8E67BB /* HostStore.swift */,
 				77894D5E9ECF92819C08704F /* Notifier.swift */,
@@ -412,6 +421,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				593547C2D2E2C7D646E81836 /* AddWorkspaceSheet.swift in Sources */,
+				3C4856AF1735F01CFEC02D91 /* AttachmentCache.swift in Sources */,
+				9BA6C23A57C4EC0BF583A400 /* AttachmentViews.swift in Sources */,
+				D1F3CA4EE2AE153325EDBAAC /* Attachments.swift in Sources */,
 				725FAE287017D43758FB631F /* ComposerView.swift in Sources */,
 				1EE7CE58C9F24C6E4C6EED13 /* ConversationView.swift in Sources */,
 				0E03724D3EF9DC847B02DF86 /* DSHDuoApp.swift in Sources */,

@@ -28,28 +28,43 @@ struct CopyButton: View {
 struct UserBubble: View {
     let item: TranscriptItem
 
+    private var attachments: [TranscriptAttachment] { item.attachments ?? [] }
+
     var body: some View {
         HStack {
-            Spacer(minLength: 48)
+            Spacer(minLength: 32)
             VStack(alignment: .trailing, spacing: 6) {
-                if let images = item.images, images > 0 {
-                    Label("\(images) image\(images == 1 ? "" : "s")", systemImage: "photo")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.85))
+                if !attachments.isEmpty {
+                    AttachmentGallery(attachments: attachments)
                 }
                 if let text = item.text, !text.isEmpty {
                     Text(text)
                         .textSelection(.enabled)
                         .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor.gradient, in: .rect(cornerRadius: 20))
+                        .messageMenu(text)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.accentColor.gradient, in: .rect(cornerRadius: 20))
-            .messageMenu(item.text ?? "")
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("You: \(item.text ?? "")")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var messageSummary: String {
+        let images = attachments.filter(\.isImage).count
+        let files = attachments.count - images
+        switch (images, files) {
+        case let (images, 0): return "\(images) image\(images == 1 ? "" : "s")"
+        case let (0, files): return "\(files) file\(files == 1 ? "" : "s")"
+        default: return "\(images) image\(images == 1 ? "" : "s"), \(files) file\(files == 1 ? "" : "s")"
+        }
+    }
+
+    private var accessibilityLabel: String {
+        if let text = item.text, !text.isEmpty { return "You: \(text)" }
+        return "You sent \(messageSummary)"
     }
 }
 
@@ -62,13 +77,21 @@ struct PendingBubble: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            HStack {
-                Spacer(minLength: 48)
-                Text(message.text)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.accentColor.gradient.opacity(0.55), in: .rect(cornerRadius: 20))
+            if !message.attachments.isEmpty {
+                HStack {
+                    Spacer(minLength: 32)
+                    PendingAttachmentGallery(attachments: message.attachments)
+                }
+            }
+            if !message.text.isEmpty {
+                HStack {
+                    Spacer(minLength: 48)
+                    Text(message.text)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor.gradient.opacity(0.55), in: .rect(cornerRadius: 20))
+                }
             }
             Label(status, systemImage: running ? (message.steer ? "arrow.turn.down.right" : "clock") : "pause.circle")
                 .font(.caption2)
@@ -232,6 +255,9 @@ struct ToolCallView: View {
                         }
                     }
                     Spacer(minLength: 4)
+                    if let count = item.attachments?.count, count > 0 {
+                        AttachmentCountBadge(count: count)
+                    }
                     status
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
@@ -286,6 +312,9 @@ struct ToolDetail: View {
                 CodeBlock(code: result, language: item.isFailedTool ? "error" : "output")
             } else if item.isRunningTool {
                 Label("Running…", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
+            }
+            if let attachments = item.attachments, !attachments.isEmpty {
+                AttachmentGallery(attachments: attachments, loneImageMax: 200, thumbSide: 64, alignment: .leading)
             }
         }
     }

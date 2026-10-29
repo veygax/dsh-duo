@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 import UserNotifications
 @testable import DSHDuo
 
@@ -94,6 +95,107 @@ struct SessionModelTests {
 }
 
 @MainActor
+struct AttachmentModelTests {
+    @Test func decodesImagesAndFilesOnAMessage() throws {
+        let json = """
+        {
+          "id": "u1", "kind": "user", "time": 1, "text": "Look at these",
+          "attachments": [
+            { "kind": "image", "attachmentId": "sha256:aa", "name": "shot.png", "mediaType": "image/png",
+              "bytes": 2048, "width": 800, "height": 600 },
+            { "kind": "file", "attachmentId": "sha256:bb", "name": "run.log", "bytes": 90 }
+          ]
+        }
+        """
+        let item = try JSONDecoder().decode(TranscriptItem.self, from: Data(json.utf8))
+        let attachments = try #require(item.attachments)
+        #expect(attachments.count == 2)
+        #expect(attachments[0].isImage)
+        #expect(attachments[0].mediaType == "image/png")
+        #expect(attachments[0].aspectRatio == 4.0 / 3.0)
+        #expect(attachments[0].fileExtension == "png")
+        #expect(attachments[1].kind == .file)
+        #expect(attachments[1].displayName == "run.log")
+        #expect(attachments[1].fileExtension == "log")
+        #expect(!attachments[1].sizeText.isEmpty)
+    }
+
+    @Test func settlesAPendingMessageCarryingTheSameAttachments() throws {
+        let model = SessionModel(id: "s")
+        model.load(items: [], live: nil, hasMore: false)
+        let pending = PendingAttachment(kind: .image, name: "a.png", bytes: 10, thumbnail: nil)
+        _ = model.addPending("", steer: false, attachments: [pending])
+        #expect(model.pending.count == 1)
+
+        let item = TranscriptItem(id: "u1", kind: .user, time: 1, text: "", attachments: [
+            TranscriptAttachment(kind: .image, attachmentId: "sha256:aa", name: "a.png",
+                                 mediaType: "image/png", bytes: 10, width: 1, height: 1),
+        ])
+        model.merge([item], replace: false)
+        #expect(model.pending.isEmpty)
+    }
+}
+
+@MainActor
+struct AttachmentPayloadTests {
+    @Test func keepsASmallPNGAsItIs() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40), format: format)
+        let data = try #require(renderer.image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        }.pngData())
+        let prepared = try #require(AttachmentPayload.image(data: data, name: "Dot"))
+        #expect(prepared.kind == .image)
+        #expect(prepared.mediaType == "image/png")
+        #expect(prepared.data == data)
+        #expect(prepared.name == "Dot.png")
+        #expect(prepared.width == 80)
+        #expect(prepared.height == 40)
+        #expect(prepared.thumbnailData != nil)
+    }
+
+    @Test func downsamplesAndReencodesALargePhoto() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 3000, height: 2000), format: format)
+        let image = renderer.image { context in
+            for row in 0..<200 {
+                UIColor(hue: CGFloat(row) / 200, saturation: 0.8, brightness: 0.9, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: CGFloat(row) * 10, width: 3000, height: 10))
+            }
+        }
+        let data = try #require(image.jpegData(compressionQuality: 0.95))
+        let prepared = try #require(AttachmentPayload.image(data: data, name: "IMG_0001"))
+        #expect(prepared.kind == .image)
+        #expect(prepared.mediaType == "image/jpeg")
+        #expect(prepared.name == "IMG_0001.jpg")
+        #expect((prepared.width ?? 0) <= 2048)
+        #expect((prepared.height ?? 0) <= 2048)
+        #expect(prepared.data.count < data.count)
+        #expect(prepared.thumbnailData != nil)
+    }
+
+    @Test func keepsAGenericFileVerbatim() throws {
+        let bytes = Data("hello attachment\n".utf8)
+        let prepared = try #require(AttachmentPayload.file(data: bytes, name: "notes.txt"))
+        #expect(prepared.kind == .file)
+        #expect(prepared.mediaType == nil)
+        #expect(prepared.data == bytes)
+        #expect(prepared.name == "notes.txt")
+    }
+
+    @Test func cachesAttachmentBytesOnDisk() throws {
+        let key = "test-\(UUID().uuidString)"
+        let bytes = Data((0..<4096).map { UInt8($0 % 251) })
+        #expect(AttachmentDiskCache.store(bytes, for: key, ext: "bin") != nil)
+        #expect(AttachmentDiskCache.data(for: key, ext: "bin") == bytes)
+        #expect(AttachmentDiskCache.sanitized("../a/b:c\n.txt") == "..-a-b-c-.txt")
+    }
+}
+
+@MainActor
 struct MarkdownTests {
     @Test func splitsBlocks() {
         let blocks = MarkdownText.parse("# Title\n\nSome *text*.\n\n- one\n- two\n\n```swift\nlet x = 1\n```")
@@ -104,6 +206,17 @@ struct MarkdownTests {
         } else {
             Issue.record("expected a code block")
         }
+    }
+
+    @Test func turnsAnImageLineIntoAPicture() {
+        let blocks = MarkdownText.parse("Before\n\n![A chart](docs/chart.png)\n\nAfter")
+        #expect(blocks.count == 3)
+        guard case .image(let alt, let source) = blocks[1] else {
+            Issue.record("expected an image block")
+            return
+        }
+        #expect(alt == "A chart")
+        #expect(source == "docs/chart.png")
     }
 }
 

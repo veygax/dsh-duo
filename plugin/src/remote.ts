@@ -38,6 +38,8 @@ const FALLBACK_WIRE: Record<string, readonly string[]> = {
   'goals/clear': ['agentId', 'ref'],
   'subagents/prompt': ['request'],
   'subagents/interruptByParent': ['childSessionId', 'parentSessionId', 'mode'],
+  'session/attachment': ['request'],
+  'fileUploads/upload': ['agentId', 'request'],
 }
 
 export class RemoteFailure extends Error {

@@ -31,6 +31,10 @@ final class HostStore {
     private(set) var questions: [String: PendingQuestion] = [:]
     private(set) var loadedOnce = false
     private var models: [String: SessionModel] = [:]
+    /// Images already fetched, decoded at a display size. Keyed by attachment id and pixel budget.
+    private let attachmentImages = NSCache<NSString, UIImage>()
+    /// Attachment reads in flight, so two views asking for the same picture share one download.
+    private var attachmentDownloads: [String: Task<Data, Error>] = [:]
 
     /// Split view selection; also drives which Session counts as "visible" for notifications.
     var selectedSessionId: String? {
@@ -52,6 +56,9 @@ final class HostStore {
     }
 
     init() {
+        // Decoded images are cheap to refetch and expensive to keep forever.
+        attachmentImages.totalCostLimit = 64 * 1024 * 1024
+        attachmentImages.countLimit = 120
         if let stored = PairingStore.load() { attach(stored) }
     }
 
@@ -387,21 +394,29 @@ final class HostStore {
         }
     }
 
-    /// Send the composer text: a `/command` runs on the Host, anything else becomes a prompt.
-    func send(_ text: String, in model: SessionModel, steer: Bool = false) async -> Bool {
+    /// Send the composer text and its attachments: a `/command` runs on the Host, anything else
+    /// becomes a prompt. Attachments upload in relay-sized chunks first, then ride the prompt.
+    func send(_ text: String, attachments: [AttachmentDraft] = [], in model: SessionModel, steer: Bool = false) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let client, !trimmed.isEmpty else { return false }
+        guard let client, !trimmed.isEmpty || !attachments.isEmpty else { return false }
         model.sending = true
         defer { model.sending = false }
         let echo = sessions[model.id]?.running == true && !trimmed.hasPrefix("/")
-            ? model.addPending(trimmed, steer: steer) : nil
+            ? model.addPending(trimmed, steer: steer, attachments: attachments.map(\.pending)) : nil
+        var uploads: [String] = []
         do {
-            let value = try await client.request("session.prompt", [
+            for draft in attachments {
+                uploads.append(try await upload(draft, in: model.id))
+            }
+            var params: [String: Any] = [
                 "sessionId": model.id,
-                "text": trimmed,
                 "mode": steer ? "steer" : "queue",
                 "timeZone": TimeZone.current.identifier,
-            ])
+            ]
+            if !trimmed.isEmpty { params["text"] = trimmed }
+            if !uploads.isEmpty { params["uploads"] = uploads }
+            let value = try await client.request("session.prompt", params, timeout: .seconds(120))
+            for draft in attachments { draft.progress = nil }
             // Command output arrives in the transcript as a `command/done` notice.
             if value["kind"]?.string == "command" { Haptics.success() }
             if var session = sessions[model.id] {
@@ -412,10 +427,153 @@ final class HostStore {
             return true
         } catch {
             if let echo { model.dropPending(echo) }
+            for draft in attachments { draft.progress = nil }
+            // Send back what the Mac already stored, so nothing is left staged.
+            for uploadId in uploads { await discardUpload(uploadId) }
             Haptics.error()
             show(error)
             return false
         }
+    }
+
+    // MARK: Attachments
+
+    /// Raw bytes per upload frame. Encoded twice, it stays comfortably inside one 4 MB relay frame.
+    private static let uploadChunkBytes = 512 * 1024
+
+    /// Upload one attachment in chunks and return the id its prompt names.
+    private func upload(_ draft: AttachmentDraft, in sessionId: String) async throws -> String {
+        guard let client else { throw RemoteError(code: "duo/unpaired", message: "Not paired") }
+        var uploadId: String?
+        var offset = 0
+        do {
+            repeat {
+                let end = min(offset + Self.uploadChunkBytes, draft.data.count)
+                let chunk = draft.data.subdata(in: offset..<end)
+                var params: [String: Any] = [
+                    "sessionId": sessionId,
+                    "data": chunk.base64EncodedString(),
+                    "done": end >= draft.data.count,
+                ]
+                if let uploadId {
+                    params["uploadId"] = uploadId
+                    params["offset"] = offset
+                } else {
+                    params["kind"] = draft.kind.rawValue
+                    params["name"] = draft.name
+                    if let mediaType = draft.mediaType { params["mediaType"] = mediaType }
+                }
+                let value = try await client.request("attachment.upload", params, timeout: .seconds(60))
+                guard let id = value["uploadId"]?.string else {
+                    throw RemoteError(code: "duo/bad-response", message: "The Mac did not accept that attachment")
+                }
+                uploadId = id
+                offset = end
+                draft.progress = draft.data.isEmpty ? 1 : Double(offset) / Double(draft.data.count)
+            } while offset < draft.data.count
+        } catch {
+            // A partial upload has no prompt to consume it; drop it rather than leave it to expire.
+            if let uploadId { await discardUpload(uploadId) }
+            throw error
+        }
+        guard let uploadId else { throw RemoteError(code: "duo/bad-response", message: "The Mac did not accept that attachment") }
+        return uploadId
+    }
+
+    /// Drop an upload the Mac will not receive, best effort: its staged bytes stay on the Mac only until it expires.
+    private func discardUpload(_ uploadId: String) async {
+        _ = try? await client?.request("attachment.discard", ["uploadId": uploadId], timeout: .seconds(10))
+    }
+
+    /// Read one durable attachment the transcript references, a chunk at a time, with a disk cache.
+    func attachmentData(_ attachment: TranscriptAttachment, in sessionId: String) async throws -> Data {
+        if let cached = AttachmentDiskCache.data(for: attachment.attachmentId, ext: attachment.fileExtension) {
+            return cached
+        }
+        if let inflight = attachmentDownloads[attachment.attachmentId] { return try await inflight.value }
+        let key = attachment.attachmentId
+        let task = Task<Data, Error> { [weak self] in
+            guard let self, let client = self.client else {
+                throw RemoteError(code: "duo/unpaired", message: "Not paired")
+            }
+            var data = Data()
+            var offset = 0
+            while true {
+                let value = try await client.request("attachment.read", [
+                    "sessionId": sessionId,
+                    "attachmentId": attachment.attachmentId,
+                    "offset": offset,
+                ], timeout: .seconds(60))
+                guard let encoded = value["data"]?.string, let chunk = Data(base64Encoded: encoded) else {
+                    throw RemoteError(code: "duo/bad-response", message: "The Mac sent an unreadable attachment")
+                }
+                data.append(chunk)
+                if data.count > 128 * 1024 * 1024 {
+                    throw RemoteError(code: "duo/too-large", message: "That attachment is too large to open here")
+                }
+                guard let next = value["next"]?.number, next > Double(offset) else { break }
+                offset = Int(next)
+            }
+            return data
+        }
+        attachmentDownloads[key] = task
+        do {
+            let data = try await task.value
+            attachmentDownloads[key] = nil
+            AttachmentDiskCache.store(data, for: key, ext: attachment.fileExtension)
+            return data
+        } catch {
+            attachmentDownloads[key] = nil
+            throw error
+        }
+    }
+
+    /// One image, decoded at a size the chat can display without holding the full photo.
+    func attachmentThumbnail(_ attachment: TranscriptAttachment, in sessionId: String, maxPixel: CGFloat = 640) async -> UIImage? {
+        let key = "\(attachment.attachmentId):\(Int(maxPixel))" as NSString
+        if let cached = attachmentImages.object(forKey: key) { return cached }
+        guard let data = try? await attachmentData(attachment, in: sessionId) else { return nil }
+        let image = await Task.detached(priority: .userInitiated) {
+            AttachmentMedia.thumbnail(data: data, maxPixel: maxPixel)
+        }.value
+        if let image { attachmentImages.setObject(image, forKey: key, cost: data.count) }
+        return image
+    }
+
+    /// Write an attachment to a private file so QuickLook can show or share it.
+    func attachmentFile(_ attachment: TranscriptAttachment, in sessionId: String) async -> URL? {
+        do {
+            let data = try await attachmentData(attachment, in: sessionId)
+            var name = attachment.displayName
+            if (name as NSString).pathExtension.isEmpty, let ext = attachment.fileExtension {
+                name += ".\(ext)"
+            }
+            var url = try AttachmentDiskCache.temporaryFile(named: name, data: data)
+            // QuickLook shows text by its type; a source file or an unknown extension reads as plain text.
+            if !QLPreviewController.canPreview(url as NSURL), String(data: data, encoding: .utf8) != nil {
+                let text = url.deletingPathExtension().appendingPathExtension("txt")
+                if (try? FileManager.default.moveItem(at: url, to: text)) != nil { url = text }
+            }
+            return url
+        } catch {
+            show(error)
+            return nil
+        }
+    }
+
+    /// A Markdown image on the Mac: read up to 2 MB the way `fs.read` does, and decode a display copy.
+    func image(at path: String, in sessionId: String) async -> UIImage? {
+        let key = "\(sessionId):\(path)" as NSString
+        if let cached = attachmentImages.object(forKey: key) { return cached }
+        guard let client else { return nil }
+        guard let value = try? await client.request("fs.read", ["path": path, "sessionId": sessionId], timeout: .seconds(60)),
+              value["folder"]?.bool != true,
+              let encoded = value["data"]?.string, let data = Data(base64Encoded: encoded) else { return nil }
+        let image = await Task.detached(priority: .userInitiated) {
+            AttachmentMedia.thumbnail(data: data, maxPixel: 1600)
+        }.value
+        if let image { attachmentImages.setObject(image, forKey: key, cost: data.count) }
+        return image
     }
 
     func cancel(_ sessionId: String) async {
