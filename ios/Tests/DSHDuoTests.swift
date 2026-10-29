@@ -70,6 +70,27 @@ struct SessionModelTests {
         model.applyLive(end)
         #expect(model.live == nil)
     }
+
+    @Test func decodesSubagentSessionsAndGoals() throws {
+        let json = """
+        {
+          "id": "s-sub", "title": "Triage the login race", "updatedAt": 900, "running": true, "blank": false,
+          "questions": 0, "parentId": "s-main",
+          "subagent": { "mode": "continuable", "label": "Login triage" },
+          "goal": {
+            "id": "goal-1", "revision": 2, "objective": "Find the race", "phase": "active",
+            "roundsStarted": 3, "maxGoalRounds": 12, "activation": "disarmed"
+          }
+        }
+        """
+        let session = try JSONDecoder().decode(SessionInfo.self, from: Data(json.utf8))
+        #expect(session.isSubagent)
+        #expect(session.parentId == "s-main")
+        #expect(session.subagent?.mode == .continuable)
+        #expect(session.goal?.objective == "Find the race")
+        #expect(session.goal?.isDisarmed == true)
+        #expect(session.goal?.isVisible == true)
+    }
 }
 
 @MainActor

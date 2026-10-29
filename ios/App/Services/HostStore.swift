@@ -251,19 +251,56 @@ final class HostStore {
     }
 
     /// Sessions grouped for the sidebar: each Workspace in Host order, then unassigned Sessions.
-    func sections(matching query: String) -> [(workspace: Workspace?, sessions: [SessionInfo])] {
+    /// Subagent conversations hang beneath their parent row, at any depth.
+    func sections(matching query: String) -> [(workspace: Workspace?, nodes: [SessionNode])] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let visible = sortedSessions.filter { session in
-            needle.isEmpty || session.title.lowercased().contains(needle) || (session.cwd?.lowercased().contains(needle) ?? false)
+        let all = sortedSessions
+        let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
+
+        func matches(_ session: SessionInfo) -> Bool {
+            needle.isEmpty
+                || session.title.lowercased().contains(needle)
+                || (session.cwd?.lowercased().contains(needle) ?? false)
+                || (session.goal?.objective.lowercased().contains(needle) ?? false)
         }
-        var result: [(Workspace?, [SessionInfo])] = []
+
+        var childrenByParent: [String: [SessionInfo]] = [:]
+        for session in all where session.isSubagent {
+            guard let parentId = session.parentId, byId[parentId] != nil else { continue }
+            childrenByParent[parentId, default: []].append(session)
+        }
+
+        func makeNode(_ session: SessionInfo, path: inout Set<String>) -> SessionNode {
+            guard path.insert(session.id).inserted else { return SessionNode(session: session, children: []) }
+            let children = (childrenByParent[session.id] ?? []).map { makeNode($0, path: &path) }
+            path.remove(session.id)
+            return SessionNode(session: session, children: children)
+        }
+
+        // Keep a parent when a descendant matches, so a search hit stays reachable in the tree.
+        func filtered(_ node: SessionNode) -> SessionNode? {
+            let children = node.children.compactMap(filtered)
+            guard matches(node.session) || !children.isEmpty else { return nil }
+            return SessionNode(session: node.session, children: children)
+        }
+
+        let roots = all.filter { session in
+            guard session.isSubagent, let parentId = session.parentId else { return true }
+            return byId[parentId] == nil
+        }
+        let nodes = roots.compactMap { root -> SessionNode? in
+            var path = Set<String>()
+            return filtered(makeNode(root, path: &path))
+        }
+
+        var result: [(Workspace?, [SessionNode])] = []
         var placed = Set<String>()
         for workspace in workspaces {
-            let members = visible.filter { $0.workspaceId == workspace.id }
+            let members = nodes.filter { $0.session.workspaceId == workspace.id }
             placed.formUnion(members.map(\.id))
             if !members.isEmpty || needle.isEmpty { result.append((workspace, members)) }
         }
-        let rest = visible.filter { !placed.contains($0.id) }
+        let rest = nodes.filter { !placed.contains($0.id) }
         if !rest.isEmpty { result.append((nil, rest)) }
         return result
     }
@@ -459,6 +496,52 @@ final class HostStore {
         } catch { show(error) }
     }
 
+    // MARK: Goals
+
+    /// Change a goal's objective with the exact compare-and-set ref the Host requires.
+    @discardableResult
+    func editGoal(_ goal: Goal, objective: String, in sessionId: String) async -> Bool {
+        let objective = objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !objective.isEmpty else { return false }
+        return await mutateGoal("session.goal.edit", goal, in: sessionId, objective: objective)
+    }
+
+    @discardableResult
+    func pauseGoal(_ goal: Goal, in sessionId: String) async -> Bool {
+        await mutateGoal("session.goal.pause", goal, in: sessionId)
+    }
+
+    @discardableResult
+    func resumeGoal(_ goal: Goal, in sessionId: String) async -> Bool {
+        await mutateGoal("session.goal.resume", goal, in: sessionId)
+    }
+
+    @discardableResult
+    func clearGoal(_ goal: Goal, in sessionId: String) async -> Bool {
+        await mutateGoal("session.goal.clear", goal, in: sessionId)
+    }
+
+    private func mutateGoal(_ op: String, _ goal: Goal, in sessionId: String, objective: String? = nil) async -> Bool {
+        guard let client else { return false }
+        // The request envelope owns `id`; the goal's identity travels as `goalId`.
+        var params: [String: Any] = ["sessionId": sessionId, "goalId": goal.id, "revision": goal.revision]
+        if let objective { params["objective"] = objective }
+        do {
+            let value = try await client.request(op, params)
+            if op == "session.goal.clear" {
+                sessions[sessionId]?.goal = nil
+            } else if let goal = try? value.decode(Goal.self) {
+                sessions[sessionId]?.goal = goal
+            }
+            Haptics.success()
+            return true
+        } catch {
+            Haptics.error()
+            show(error)
+            return false
+        }
+    }
+
     func answer(_ question: PendingQuestion, _ answers: [QuestionAnswer]) async -> Bool {
         guard let client else { return false }
         do {
@@ -540,5 +623,17 @@ final class HostStore {
     func show(_ error: Error) {
         let message = (error as? RemoteError)?.message ?? error.localizedDescription
         banner = Banner(title: "Something went wrong", message: message, isError: true)
+    }
+}
+
+/// One row of the sidebar tree: a Session and the subagent conversations beneath it.
+nonisolated struct SessionNode: Identifiable, Hashable, Sendable {
+    var session: SessionInfo
+    var children: [SessionNode]
+
+    var id: String { session.id }
+
+    var descendantCount: Int {
+        children.reduce(0) { $0 + 1 + $1.descendantCount }
     }
 }

@@ -98,6 +98,18 @@ struct SessionView: View {
         .animation(.snappy, value: fetching)
         .animation(.smooth, value: typing)
         .animation(.smooth, value: searching)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let session, session.isSubagent {
+                SubagentBar(
+                    session: session,
+                    parent: session.parentId.flatMap { store.sessions[$0] }
+                ) {
+                    guard let parentId = session.parentId else { return }
+                    Haptics.selection()
+                    store.selectedSessionId = parentId
+                }
+            }
+        }
         .navigationTitle(session?.title ?? "Session")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar(session) }
@@ -197,6 +209,47 @@ struct SessionView: View {
     }
 
     private var typing: Bool { searching && !query.trimmingCharacters(in: .whitespaces).isEmpty }
+}
+
+/// The thin lineage bar above a subagent conversation, with a way back to its parent.
+private struct SubagentBar: View {
+    let session: SessionInfo
+    let parent: SessionInfo?
+    let openParent: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "person.2.fill")
+                .foregroundStyle(.secondary)
+            Text("Subagent")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let detail = parent?.title ?? session.subagent?.label, !detail.isEmpty {
+                Text("·")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if parent != nil {
+                Button("Open Parent", systemImage: "arrow.up.left", action: openParent)
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                    .accessibilityHint("Shows the session that started this subagent")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Subagent conversation with \(parent?.title ?? session.subagent?.label ?? "its parent")")
+    }
 }
 
 /// Markdown links DeepSeek writes to files on the Mac: `[a.swift](src/a.swift)`, `[x](/Users/me/x.md:42)`,

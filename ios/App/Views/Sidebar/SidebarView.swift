@@ -8,6 +8,8 @@ struct SidebarView: View {
     @State private var addingWorkspace = false
     @State private var showingSettings = false
     @State private var renaming: SessionInfo?
+    /// Subagent groups start open; a user can tuck one away without losing the parent row.
+    @State private var collapsed: Set<String> = []
 
     var body: some View {
         @Bindable var store = store
@@ -28,16 +30,19 @@ struct SidebarView: View {
 
             ForEach(store.sections(matching: query), id: \.workspace?.id) { section in
                 Section {
-                    ForEach(section.sessions) { session in
-                        SessionRow(session: session)
-                            .tag(session.id)
-                            .contextMenu { rowMenu(session) }
-                            .swipeActions(edge: .trailing) {
-                                Button("Rename", systemImage: "pencil", action: tap { renaming = session })
-                                    .tint(.indigo)
+                    ForEach(flatten(section.nodes)) { item in
+                        SessionFlatRow(item: item) {
+                            withAnimation(.snappy) {
+                                if collapsed.contains(item.id) { collapsed.remove(item.id) }
+                                else { collapsed.insert(item.id) }
                             }
+                        } onRename: { session in
+                            renaming = session
+                        } onQuickStart: { session in
+                            quickStart(in: session.workspaceId, cwd: session.cwd)
+                        }
                     }
-                    if section.sessions.isEmpty, let workspace = section.workspace {
+                    if section.nodes.isEmpty, let workspace = section.workspace {
                         Button(action: tap { quickStart(in: workspace.id) }) {
                             Label("Start a session", systemImage: "plus.bubble")
                                 .foregroundStyle(.secondary)
@@ -58,7 +63,7 @@ struct SidebarView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New Session", systemImage: "square.and.pencil", action: tap {
-                    newSessionWorkspace = .init(workspaceId: store.sessions[store.selectedSessionId ?? ""]?.workspaceId)
+                    newSessionWorkspace = .init(workspaceId: selectedWorkspaceId)
                 })
                 .disabled(store.connection != .online)
                 .keyboardShortcut("n", modifiers: .command)
@@ -78,6 +83,7 @@ struct SidebarView: View {
         .sheet(isPresented: $addingWorkspace) { AddWorkspaceSheet() }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(item: $renaming) { session in RenameSheet(session: session) }
+        .onChange(of: store.selectedSessionId) { _, id in revealAncestors(of: id) }
     }
 
     /// Start a session in this folder right away, in the last mode used; the full chooser
@@ -91,17 +97,33 @@ struct SidebarView: View {
         }
     }
 
-    @ViewBuilder
-    private func rowMenu(_ session: SessionInfo) -> some View {
-        Button("Open", systemImage: "arrow.up.forward", action: tap { store.selectedSessionId = session.id })
-        Button("Rename", systemImage: "pencil", action: tap { renaming = session })
-        Button("New Session Here", systemImage: "plus.bubble", action: tap {
-            quickStart(in: session.workspaceId, cwd: session.cwd)
-        })
-        if let cwd = session.cwd {
-            Button("Copy Folder Path", systemImage: "doc.on.doc", action: tap { UIPasteboard.general.string = cwd })
+    /// A subagent inherits its parent's workspace; New Session from one opens there.
+    private var selectedWorkspaceId: String? {
+        guard let session = store.sessions[store.selectedSessionId ?? ""] else { return nil }
+        return session.workspaceId ?? session.parentId.flatMap { store.sessions[$0]?.workspaceId }
+    }
+
+    /// Opening a subagent from a notification or a link should not land in a folded branch.
+    private func revealAncestors(of sessionId: String?) {
+        guard let sessionId, var session = store.sessions[sessionId] else { return }
+        while let parentId = session.parentId {
+            collapsed.remove(parentId)
+            guard let parent = store.sessions[parentId] else { return }
+            session = parent
         }
-        Button("Copy Session ID", systemImage: "number", action: tap { UIPasteboard.general.string = session.id })
+    }
+
+    /// The visible rows of one workspace section, with subagent branches expanded or folded.
+    private func flatten(_ nodes: [SessionNode], depth: Int = 0) -> [SessionRowItem] {
+        nodes.flatMap { node in
+            // A search should reveal the matching branch even if the user folded it earlier.
+            let open = !collapsed.contains(node.id) || !query.isEmpty
+            var rows = [SessionRowItem(node: node, depth: depth, expanded: open && !node.children.isEmpty)]
+            if open {
+                rows.append(contentsOf: flatten(node.children, depth: depth + 1))
+            }
+            return rows
+        }
     }
 }
 
@@ -176,6 +198,7 @@ private struct ConnectionRow: View {
 struct SessionRow: View {
     @Environment(HostStore.self) private var store
     let session: SessionInfo
+    var subagentCount = 0
 
     var body: some View {
         let mode = store.mode(of: session)
@@ -185,10 +208,25 @@ struct SessionRow: View {
                     .font(.body.weight(session.running ? .semibold : .regular))
                     .lineLimit(2)
                 HStack(spacing: 6) {
-                    Label(mode.name, systemImage: mode.symbol)
-                        .labelStyle(.titleAndIcon)
+                    if session.isSubagent {
+                        Label(session.subagent?.mode.title ?? "Subagent", systemImage: "person.2.fill")
+                            .labelStyle(.titleAndIcon)
+                    } else {
+                        Label(mode.name, systemImage: mode.symbol)
+                            .labelStyle(.titleAndIcon)
+                    }
                     Text("·")
                     Text(session.updated, format: .relative(presentation: .named))
+                    if let goal = session.goal, goal.isVisible {
+                        Image(systemName: "target")
+                            .foregroundStyle(goal.phase == .blocked ? .orange : .secondary)
+                            .accessibilityLabel(goal.phase == .blocked ? "Goal blocked" : "Has a goal")
+                    }
+                    if subagentCount > 0 {
+                        Label("\(subagentCount)", systemImage: "person.2")
+                            .labelStyle(.titleAndIcon)
+                            .accessibilityLabel(subagentCount == 1 ? "1 subagent conversation" : "\(subagentCount) subagent conversations")
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -207,6 +245,74 @@ struct SessionRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// One visible row in the sidebar tree, carrying its depth and whether its branch is open.
+private struct SessionRowItem: Identifiable {
+    let node: SessionNode
+    let depth: Int
+    let expanded: Bool
+    var id: String { node.id }
+}
+
+/// A normal, selectable Session row with a disclosure control for its subagent branch.
+/// Keeping the chevron a separate button means tapping the label opens the parent Session.
+private struct SessionFlatRow: View {
+    @Environment(HostStore.self) private var store
+    let item: SessionRowItem
+    let toggle: () -> Void
+    let onRename: (SessionInfo) -> Void
+    let onQuickStart: (SessionInfo) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if item.depth > 0 {
+                Color.clear.frame(width: CGFloat(item.depth) * 16, height: 1)
+            }
+            if item.node.children.isEmpty {
+                Color.clear.frame(width: 18, height: 1)
+            } else {
+                Button(action: toggle) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(item.expanded ? 90 : 0))
+                        .frame(width: 18, height: 30)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(item.expanded ? "Hide subagents" : "Show subagents")
+            }
+            SessionRow(session: item.node.session, subagentCount: item.node.descendantCount)
+        }
+        .animation(.snappy, value: item.expanded)
+        .contentShape(.rect)
+        .tag(item.id)
+        .contextMenu { contextMenu }
+        .swipeActions(edge: .trailing) {
+            Button("Rename", systemImage: "pencil") { onRename(item.node.session) }
+                .tint(.indigo)
+        }
+    }
+
+    @ViewBuilder
+    private var contextMenu: some View {
+        Button("Open", systemImage: "arrow.up.forward") { store.selectedSessionId = item.id }
+        if item.node.session.isSubagent, let parentId = item.node.session.parentId, store.sessions[parentId] != nil {
+            Button("Open Parent Session", systemImage: "arrow.up.left") { store.selectedSessionId = parentId }
+        }
+        Button("Rename", systemImage: "pencil") { onRename(item.node.session) }
+        if !item.node.session.isSubagent {
+            Button("New Session Here", systemImage: "plus.bubble") { onQuickStart(item.node.session) }
+        }
+        if let cwd = item.node.session.cwd {
+            Button("Copy Folder Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = cwd }
+        }
+        if let goal = item.node.session.goal, goal.isVisible {
+            Button("Copy Goal", systemImage: "target") { UIPasteboard.general.string = goal.objective }
+        }
+        Button("Copy Session ID", systemImage: "number") { UIPasteboard.general.string = item.id }
     }
 }
 

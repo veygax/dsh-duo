@@ -29,6 +29,23 @@ function events(): DirectoryEvents {
   return { upsert: () => {}, remove: () => {}, workspaces: () => {}, questions: () => {} }
 }
 
+/** A Remote that answers one list and then leaves both follow streams open until aborted. */
+function staticRemote(items: unknown[], signal: AbortSignal): Remote {
+  const idle = {
+    [Symbol.asyncIterator]: () => ({
+      next: () => new Promise<IteratorResult<never>>((resolve) => {
+        if (signal.aborted) resolve({ done: true, value: undefined })
+        else signal.addEventListener('abort', () => resolve({ done: true, value: undefined }), { once: true })
+      }),
+    }),
+  }
+  const stub = {
+    async call<T>(): Promise<T> { return { items } as T },
+    async stream(): Promise<typeof idle> { return idle },
+  }
+  return stub as unknown as Remote
+}
+
 /** A Remote whose first `failures` session lists reject, and whose streams idle until aborted. */
 function fakeRemote(failures: number, signal: AbortSignal): { remote: Remote; calls: () => number } {
   let calls = 0
@@ -62,6 +79,43 @@ test('the first session list survives the Host activation race', async () => {
 
   assert.equal(calls(), 2, 'the rejected list was retried once')
   assert.deepEqual(directory.sessions().map(session => session.title), ['Fix the login bug'])
+  controller.abort()
+})
+
+test('subagent conversations keep their parent, label, and goal', async () => {
+  const controller = new AbortController()
+  const child = {
+    sessionId: 'sess-sub',
+    agentAvailable: true,
+    updatedAt: 900,
+    running: false,
+    blank: false,
+    cwd: '/work/app',
+    parentSessionId: 'sess-1',
+    origin: 'subagent',
+    projections: { kind: 'sequenced', asOfSeq: 9, values: {
+      title: 'Triage the login bug',
+      subagent: { mode: 'continuable', label: 'Login triage' },
+      goal: {
+        goal: { id: 'goal-1', revision: 2, objective: 'Find the race', phase: 'active', maxGoalRounds: 12 },
+        roundsStarted: 3,
+        createdAt: 1,
+        updatedAt: 9,
+      },
+    } },
+  }
+  const directory = new Directory(staticRemote([row, child], controller.signal), events(), controller.signal, () => {})
+
+  await directory.ready()
+  const session = directory.view('sess-sub')
+  assert.equal(session?.parentId, 'sess-1')
+  assert.deepEqual(session?.subagent, { mode: 'continuable', label: 'Login triage' })
+  assert.deepEqual(session?.goal, {
+    id: 'goal-1', revision: 2, objective: 'Find the race', phase: 'active', roundsStarted: 3, maxGoalRounds: 12,
+  })
+
+  directory.setGoalActivation('sess-sub', { id: 'goal-1', revision: 2, activation: 'armed' })
+  assert.equal(directory.view('sess-sub')?.goal?.activation, 'armed')
   controller.abort()
 })
 

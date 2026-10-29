@@ -20,13 +20,75 @@ nonisolated struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
     var permission: String?
     var questions: Int
     var parentId: String?
+    /// Present on conversations delegated to a subagent.
+    var subagent: SubagentInfo?
+    /// The durable completion objective, while one is set.
+    var goal: Goal?
 
     var updated: Date { Date(timeIntervalSince1970: updatedAt / 1000) }
+    var isSubagent: Bool { subagent != nil }
 
     /// Last path component of the working directory, for compact rows.
     var folderName: String? {
         cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
     }
+}
+
+/// One subagent conversation's role: continuable children accept follow-up messages.
+nonisolated struct SubagentInfo: Codable, Hashable, Sendable {
+    enum Mode: String, Codable, Sendable {
+        case oneShot = "one-shot"
+        case continuable
+        case external
+        case unknown
+
+        /// One-shot and external children have finished their task; only continuable ones take messages.
+        var acceptsMessages: Bool { self == .continuable }
+
+        var title: String {
+            switch self {
+            case .oneShot: "One-shot subagent"
+            case .continuable: "Continuable subagent"
+            case .external: "External subagent"
+            case .unknown: "Subagent"
+            }
+        }
+    }
+
+    var mode: Mode
+    var label: String?
+}
+
+/// A session's durable completion objective and its process-local activation.
+nonisolated struct Goal: Codable, Hashable, Sendable, Identifiable {
+    enum Phase: String, Codable, Sendable {
+        case active, paused, blocked, complete
+
+        /// A completed goal stays in the Session log but no longer needs a strip above the composer.
+        var isVisible: Bool { self != .complete }
+    }
+
+    enum Activation: String, Codable, Sendable {
+        case armed, disarmed
+    }
+
+    struct Blocker: Codable, Hashable, Sendable {
+        var code: String
+        var message: String
+    }
+
+    var id: String
+    var revision: Int
+    var objective: String
+    var phase: Phase
+    var blockedReason: Blocker?
+    var roundsStarted: Int
+    var maxGoalRounds: Int
+    var activation: Activation?
+
+    /// An active goal after a reconnect is durable but disarmed; show it as inactive.
+    var isDisarmed: Bool { phase == .active && activation == .disarmed }
+    var isVisible: Bool { phase.isVisible }
 }
 
 /// How much DeepSeek may do on its own: a sandbox and an approval policy, switched together.

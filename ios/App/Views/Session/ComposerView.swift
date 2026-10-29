@@ -11,8 +11,15 @@ struct ComposerView: View {
 
     private var session: SessionInfo? { store.sessions[sessionId] }
     private var running: Bool { session?.running == true }
+    private var subagentMode: SubagentInfo.Mode? { session?.subagent?.mode }
+    /// A finished one-shot or external subagent is a record, not a conversation to reply to.
+    private var readOnly: Bool { subagentMode?.acceptsMessages == false }
+    private var placeholder: String {
+        if session?.isSubagent == true { return running ? "Steer this subagent…" : "Message this subagent" }
+        return running ? "Steer this turn…" : "Message DeepSeek"
+    }
     private var canSend: Bool {
-        !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.sending && store.connection == .online
+        !readOnly && !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.sending && store.connection == .online
     }
 
     /// Text after a leading slash while the user is still typing the command name.
@@ -33,6 +40,13 @@ struct ComposerView: View {
 
     var body: some View {
         FoldAware {
+            if readOnly {
+                ReadOnlySubagentCard(mode: subagentMode ?? .unknown, running: running) {
+                    Haptics.press()
+                    Task { await store.cancel(sessionId) }
+                }
+                .frame(maxWidth: 780)
+            } else {
             VStack(spacing: 8) {
                 if !matches.isEmpty {
                     SlashCommandList(commands: matches) { command in
@@ -44,7 +58,7 @@ struct ComposerView: View {
                     .glassEffectID("commands", in: glass)
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    TextField(running ? "Steer this turn…" : "Message DeepSeek", text: $model.draft, axis: .vertical)
+                    TextField(placeholder, text: $model.draft, axis: .vertical)
                         .lineLimit(1...8)
                         .focused(focused)
                         .textInputAutocapitalization(.sentences)
@@ -61,7 +75,9 @@ struct ComposerView: View {
                         .accessibilityLabel("Message")
 
                     HStack(spacing: 8) {
-                        ModeMenu(sessionId: sessionId)
+                        if session?.isSubagent != true {
+                            ModeMenu(sessionId: sessionId)
+                        }
                         ModelMenu(sessionId: sessionId)
                         PermissionMenu(sessionId: sessionId)
                         Button("Commands", systemImage: "slash.circle", action: tap {
@@ -93,6 +109,7 @@ struct ComposerView: View {
             }
             .frame(maxWidth: 780)
             .animation(.snappy, value: matches.map(\.id))
+            }
         }
         .onChange(of: model.draft) { _, draft in
             if !draft.hasPrefix("/") { showCommands = false }
@@ -159,6 +176,41 @@ private extension View {
             .buttonBorderShape(.circle)
             .disabled(disabled)
             .overlay { if sending { ProgressView().controlSize(.small) } }
+    }
+}
+
+/// Finished subagent conversations keep their transcript but no composer: there is nobody left to ask.
+private struct ReadOnlySubagentCard: View {
+    let mode: SubagentInfo.Mode
+    let running: Bool
+    let stop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "person.2.slash")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mode.title)
+                    .font(.subheadline.weight(.semibold))
+                Text("This subagent conversation is read-only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if running {
+                Button("Stop", systemImage: "stop.fill", action: stop)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(.red)
+                    .accessibilityHint("Stops this subagent")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glassEffect(.regular, in: .rect(corners: .concentric(minimum: 24), isUniform: true))
+        .accessibilityElement(children: .contain)
     }
 }
 

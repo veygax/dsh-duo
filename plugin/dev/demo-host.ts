@@ -6,8 +6,9 @@
  *
  * Prompts stream back thinking, a tool call and a reply; a prompt containing
  * "ask" makes DeepSeek ask a question ("ask several": two, one multi-select); "permission" makes its
- * tool call ask for approval;
- * `/compact` runs a command.
+ * tool call ask for approval; `/compact` runs a command. The pagination session
+ * carries a goal, and the login session owns a continuable subagent, so both new
+ * surfaces are visible without real dsh.
  */
 
 import { mkdtemp } from 'node:fs/promises'
@@ -66,6 +67,12 @@ interface DemoSession {
   permission: string
   title: string
   turn: number
+  /** The durable goal projection, when this Session has one. */
+  goal?: { goal: Json; roundsStarted: number; createdAt: number; updatedAt: number }
+  activation?: 'armed' | 'disarmed'
+  /** Set on delegated conversations. */
+  parentId?: string
+  subagent?: Json
   /** Prompts sent with mode "queue" during a turn; each runs as its own turn afterwards. */
   queued?: string[]
 }
@@ -154,6 +161,31 @@ for (const [id, title] of [['s-long', 'Long refactor'], ['s-long-2', 'Long migra
   ]).flat())
 }
 
+// A delegated conversation under the login session: its own transcript, nested in the picker.
+session('s-login-triage', 'Triage the flaky login test', '/Users/dev/Code/webapp', 3, 'standard', [
+  ev('turn/start', { turn: 1 }),
+  user('Reproduce the flaky login test and tell me whether the wait or the server is at fault.'),
+  assistant(1, [{ type: 'reasoning', text: 'Run the spec repeatedly, then inspect the network timing around the auth request.' }]),
+  assistant(1, [{ type: 'text', text: 'The failure is in the test: it navigates before the `/api/session` response arrives. The server is fine.' }]),
+  ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+])
+const triage = sessions.get('s-login-triage')!
+triage.summary = { ...triage.summary, parentSessionId: 's-login', origin: 'subagent' }
+triage.subagent = { mode: 'continuable', label: 'Login test triage' }
+
+// A goal on the pagination session, so the strip above the composer has something to show.
+const api = sessions.get('s-api')!
+api.goal = {
+  goal: {
+    id: 'goal-pagination', revision: 3, objective: 'Ship cursor pagination for GET /orders with tests and a migration note',
+    phase: 'active', maxGoalRounds: 20,
+  },
+  roundsStarted: 2,
+  createdAt: now - 7_200_000,
+  updatedAt: now - 600_000,
+}
+api.activation = 'armed'
+
 const workspaces = [
   { workspaceId: 'w-web', path: '/Users/dev/Code/webapp', title: 'webapp', sessionIds: ['s-login', 's-api'] },
   { workspaceId: 'w-plugins', path: '/Users/dev/Code/dsh-plugins', title: 'dsh-plugins', sessionIds: ['s-plugin'] },
@@ -163,8 +195,27 @@ const controlFeeds = new Set<Feed<Json>>()
 
 function values(id: string): Json {
   const entry = sessions.get(id)!
-  return { title: entry.title, agentPreset: entry.preset, modelSelection: { next: entry.model, lastUsed: entry.model }, workingDirectory: entry.summary.cwd,
-    permissions: { currentValue: entry.permission } }
+  return {
+    title: entry.title,
+    agentPreset: entry.preset,
+    modelSelection: { next: entry.model, lastUsed: entry.model },
+    workingDirectory: entry.summary.cwd,
+    permissions: { currentValue: entry.permission },
+    goal: entry.goal ?? null,
+    subagent: entry.subagent ?? null,
+  }
+}
+
+function goalView(id: string): Json | null {
+  const entry = sessions.get(id)!
+  if (entry.goal === undefined) return null
+  return {
+    ...entry.goal.goal,
+    roundsStarted: entry.goal.roundsStarted,
+    createdAt: entry.goal.createdAt,
+    updatedAt: entry.goal.updatedAt,
+    activation: entry.activation ?? 'armed',
+  }
 }
 function summaryOf(id: string): Json {
   return { ...sessions.get(id)!.summary, projections: { kind: 'sequenced', asOfSeq: seq, values: values(id) } }
@@ -296,6 +347,59 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
       entry.preset = String(request.args.agentPreset)
       projection(String(request.args.agentId), 'agentPreset', entry.preset)
       return entry.preset
+    }
+    case 'goals/get': return goalView(String(request.args.agentId))
+    case 'goals/edit': {
+      const id = String(request.args.agentId)
+      const entry = sessions.get(id)!
+      const edit = (request.args.request ?? {}) as Json
+      if (entry.goal !== undefined && typeof edit.objective === 'string') {
+        entry.goal = {
+          ...entry.goal,
+          goal: { ...entry.goal.goal, objective: edit.objective, revision: Number(entry.goal.goal.revision) + 1 },
+          updatedAt: Date.now(),
+        }
+        projection(id, 'goal', entry.goal)
+      }
+      return goalView(id)
+    }
+    case 'goals/pause':
+    case 'goals/resume': {
+      const id = String(request.args.agentId)
+      const entry = sessions.get(id)!
+      const phase = endpoint === 'goals/pause' ? 'paused' : 'active'
+      if (entry.goal !== undefined) {
+        entry.goal = {
+          ...entry.goal,
+          goal: { ...entry.goal.goal, phase, revision: Number(entry.goal.goal.revision) + 1 },
+          updatedAt: Date.now(),
+        }
+        entry.activation = endpoint === 'goals/pause' ? 'disarmed' : 'armed'
+        projection(id, 'goal', entry.goal)
+      }
+      return goalView(id)
+    }
+    case 'goals/clear': {
+      const id = String(request.args.agentId)
+      const entry = sessions.get(id)!
+      const ref = entry.goal?.goal ?? {}
+      entry.goal = undefined
+      entry.activation = undefined
+      projection(id, 'goal', null)
+      return ref
+    }
+    case 'subagents/prompt': {
+      const prompt = (request.args.request ?? {}) as Json
+      const id = String(prompt.childSessionId)
+      const content = (prompt.content as Json[])[0]!
+      void runTurn(id, String(content.text))
+      return { messageId: `msg-${seq}` }
+    }
+    case 'subagents/interruptByParent': {
+      const id = String(request.args.childSessionId)
+      const entry = sessions.get(id)
+      if (entry !== undefined) entry.summary = { ...entry.summary, running: false }
+      return { accepted: true }
     }
     case 'session/create': {
       const id = `s-${Date.now().toString(36)}`

@@ -24,6 +24,9 @@ struct ConversationView: View {
                 // so their glass blends and morphs instead of stacking.
                 GlassEffectContainer(spacing: 10) {
                     VStack(spacing: 10) {
+                        if store.sessions[sessionId]?.goal?.isVisible == true {
+                            GoalBar(sessionId: sessionId)
+                        }
                         ForEach(store.questions(for: sessionId)) { question in
                             // Most of the screen at most, less the card's header and buttons: while DeepSeek
                             // waits, the prompt is what matters.
@@ -35,6 +38,7 @@ struct ConversationView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
                 .animation(.snappy, value: store.questions(for: sessionId).map(\.id))
+                .animation(.snappy, value: store.sessions[sessionId]?.goal)
             }
             .onGeometryChange(for: CGFloat.self, of: \.size.height) { height = $0 }
     }

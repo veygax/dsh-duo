@@ -256,6 +256,11 @@ export class Bridge {
     })
     // Auto review comes and goes with its integration; phones reload the list.
     on('permission-presets/catalog-changed', () => this.broadcast({ ev: 'permissions.changed' }))
+    // Activation is process-local, so it arrives beside the durable goal projection instead of in it.
+    on('goal/activation-changed', ((event: Json) => {
+      if (typeof event.sessionId !== 'string') return
+      this.directory.setGoalActivation(event.sessionId, obj(event.goal) ?? null)
+    }) as never)
     on('api-session/error', (sessionId: string, message: string) => {
       const follow = this.follows.get(sessionId)
       if (follow === undefined) return
@@ -594,8 +599,22 @@ export class Bridge {
         return await this.prompt(str(m.sessionId, 'sessionId'), str(m.text, 'text'),
           m.mode === 'steer' ? 'steer' : 'queue', typeof m.timeZone === 'string' ? m.timeZone : undefined)
       case 'session.cancel':
-        await this.remote.call('session/cancel', { sessionId: str(m.sessionId, 'sessionId') })
+        await this.cancel(str(m.sessionId, 'sessionId'))
         return null
+      case 'session.goal':
+        return await this.getGoal(str(m.sessionId, 'sessionId'))
+      case 'session.goal.edit': {
+        const sessionId = str(m.sessionId, 'sessionId')
+        const objective = str(m.objective, 'objective').trim()
+        if (objective === '') throw new RemoteFailure('duo/bad-request', 'objective is required')
+        return await this.mutateGoal(sessionId, 'edit', this.goalRef(m), { objective })
+      }
+      case 'session.goal.pause':
+        return await this.mutateGoal(str(m.sessionId, 'sessionId'), 'pause', this.goalRef(m))
+      case 'session.goal.resume':
+        return await this.mutateGoal(str(m.sessionId, 'sessionId'), 'resume', this.goalRef(m))
+      case 'session.goal.clear':
+        return await this.mutateGoal(str(m.sessionId, 'sessionId'), 'clear', this.goalRef(m))
       case 'session.model': {
         const request: Json = {
           sessionId: str(m.sessionId, 'sessionId'),
@@ -739,6 +758,22 @@ export class Bridge {
         return { kind: 'command', text: execution.result?.text }
       }
     }
+    const session = this.directory.view(sessionId)
+    if (session?.subagent !== undefined) {
+      if (session.subagent.mode !== 'continuable' || session.parentId === undefined) {
+        throw new RemoteFailure('duo/read-only', 'This subagent finished its task, so its conversation is read-only')
+      }
+      await this.remote.call('subagents/prompt', {
+        requestId: randomUUID(),
+        parentSessionId: session.parentId,
+        childSessionId: sessionId,
+        mode: 'continuable',
+        delivery: mode,
+        content: [{ type: 'text', text }],
+        ...timeZone === undefined ? {} : { clientTimeZone: timeZone },
+      })
+      return { kind: 'prompt' }
+    }
     await this.remote.call('session/prompt', {
       requestId: randomUUID(),
       sessionId,
@@ -747,6 +782,57 @@ export class Bridge {
       ...timeZone === undefined ? {} : { clientTimeZone: timeZone },
     })
     return { kind: 'prompt' }
+  }
+
+  /** Stop a normal turn, or interrupt a continuable child through its exact parent address. */
+  private async cancel(sessionId: string): Promise<void> {
+    const session = this.directory.view(sessionId)
+    if (session?.subagent?.mode === 'continuable' && session.parentId !== undefined) {
+      await this.remote.call('subagents/interruptByParent', sessionId, session.parentId, 'continuable')
+      return
+    }
+    await this.remote.call('session/cancel', { sessionId })
+  }
+
+  /** The current goal, with its process-local activation, or null when none is set. */
+  private async getGoal(sessionId: string): Promise<Json | null> {
+    const goal = await this.remote.call<Json | undefined>('goals/get', sessionId)
+    this.directory.setGoalActivation(sessionId, obj(goal) ?? null)
+    return goal ?? null
+  }
+
+  /** Re-read activation after opening a Session or changing a goal. */
+  private async refreshGoal(sessionId: string): Promise<void> {
+    try {
+      await this.getGoal(sessionId)
+    } catch {
+      // The Goal service is optional, and a cold Session has no live Agent to ask.
+    }
+  }
+
+  /** The compare-and-set ref a phone sends with a goal mutation. */
+  private goalRef(m: Json): { id: string; revision: number } {
+    // The request envelope already owns `id`; the goal's identity travels as `goalId`.
+    if (typeof m.goalId !== 'string' || m.goalId === ''
+      || typeof m.revision !== 'number' || !Number.isInteger(m.revision) || m.revision < 1) {
+      throw new RemoteFailure('duo/bad-request', 'goalId and revision are required')
+    }
+    return { id: m.goalId, revision: m.revision }
+  }
+
+  /** Mutate one goal with the phone's CAS ref and return the fresh view (or null after a clear). */
+  private async mutateGoal(
+    sessionId: string,
+    action: 'edit' | 'pause' | 'resume' | 'clear',
+    ref: { id: string; revision: number },
+    request?: Json,
+  ): Promise<Json | null> {
+    const goal = request === undefined
+      ? await this.remote.call<Json | undefined>(`goals/${action}`, sessionId, ref)
+      : await this.remote.call<Json | undefined>(`goals/${action}`, sessionId, ref, request)
+    // A clear answers with the removed ref, not a goal: forget the old activation with it.
+    this.directory.setGoalActivation(sessionId, action === 'clear' ? null : (obj(goal) ?? null))
+    return goal ?? null
   }
 
   private async answer(sessionId: string, callId: string, raw: unknown) {
@@ -868,6 +954,8 @@ export class Bridge {
     clearTimeout(follow.idleTimer)
     follow.devices.add(device)
     await follow.ready
+    // Session list hints carry the durable goal but not its process-local activation.
+    if (this.directory.view(sessionId)?.goal !== undefined) await this.refreshGoal(sessionId)
     const live = follow.live.attempt
     // Re-send questions still waiting in this Session so a fresh screen can answer them.
     const waiting = new Map<string, QuestionView>()

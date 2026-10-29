@@ -49,8 +49,11 @@ The QR code carries the room secret, so the plugin never writes it into a sessio
 
 ## What it does on the Host
 
-- Mirrors the session list, titles, modes, models and pending questions from `session/list`, the `session/control`
-  projection stream and the `api-session/*` events, and workspaces from `workspace/follow`.
+- Mirrors the session list, titles, modes, models, goals and pending questions from `session/list`, the
+  `session/control` projection stream and the `api-session/*` events, and workspaces from `workspace/follow`.
+  Subagent Sessions keep their `parentId` and mode so the phone can nest them under the Session that started them.
+- Proxies `goals/get`, `goals/edit`, `goals/pause`, `goals/resume` and `goals/clear`, and forwards the Host's
+  `goal/activation-changed` event so a resumed goal shows as armed on the phone.
 - Follows open sessions with `session/follow` (assistant streams included). It projects the log onto a small item
   vocabulary (user, thinking, text, tool, notice, turn) and coalesces streaming deltas to about 12 frames per second.
 - Holds `user-questions/request` for the phone (prepended, racing any Web client) once a phone has paired, and answers
@@ -60,6 +63,8 @@ The QR code carries the room secret, so the plugin never writes it into a sessio
   connected. It uses the key of the team that signed that copy of the app, which `ios/scripts/install.sh --apns-key`
   stores in `$DSH_HOME/duo-remote/apns.json`. The relay never holds Apple credentials.
 - `session.prompt` that starts with `/` goes through `commands/execute` first, the same way the Web composer does.
+  A prompt to a continuable subagent goes through `subagents/prompt` with its exact parent address; Stop uses
+  `subagents/interruptByParent`. A finished one-shot child is rejected as read-only.
 
 ## Develop
 

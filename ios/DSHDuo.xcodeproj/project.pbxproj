@@ -29,6 +29,7 @@
 		683D2B68220F31F50CA5C423 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7167FE20E3402F1EA60CBF1E /* NotificationService.swift */; };
 		713DC673455E96F42DF72476 /* SessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77EA4FDE575A162AD00B83C7 /* SessionView.swift */; };
 		725FAE287017D43758FB631F /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57F83951A91E7178FE4F4FE7 /* ComposerView.swift */; };
+		7C2F0CD17A64FAC9950616A2 /* GoalBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE24C501DC5FE3D48853F72F /* GoalBar.swift */; };
 		87D51B77C955D596BF07F7EC /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398F723FF55C9BCFBBE97519 /* PairingStore.swift */; };
 		8A92C9A44596E007730BBB0A /* SearchResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9CEB85426883C11C2DC9DF /* SearchResultsView.swift */; };
 		91B7B7384A2ED12407DF97ED /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EACB8C47C1FBB714E82B80B /* JSONValue.swift */; };
@@ -125,6 +126,7 @@
 		E17499819E8DC35D8A497900 /* DSHDuoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DSHDuoTests.swift; sourceTree = "<group>"; };
 		E9E363B98AD549BF178BD929 /* DSHDuoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DSHDuoApp.swift; sourceTree = "<group>"; };
 		ED92AE61B24458488741F75D /* DuoCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoCrypto.swift; sourceTree = "<group>"; };
+		EE24C501DC5FE3D48853F72F /* GoalBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalBar.swift; sourceTree = "<group>"; };
 		F3695CDB13A5BD8C6BA16208 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F4B6FE651B773D4D13315B49 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		F59D78CCDA02D550F6E5AB12 /* PushEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushEnvironment.swift; sourceTree = "<group>"; };
@@ -208,6 +210,7 @@
 				57F83951A91E7178FE4F4FE7 /* ComposerView.swift */,
 				DCEA930A7B1ED75196A172AD /* ConversationView.swift */,
 				65F6BB29DAD01D9463DA88BA /* DetailPane.swift */,
+				EE24C501DC5FE3D48853F72F /* GoalBar.swift */,
 				C4614BDF2C92334DC5EC9D83 /* ItemViews.swift */,
 				CA2AA36F597155780941DBEF /* MarkdownText.swift */,
 				A6A5D605C2EC1AF5105D8B98 /* Menus.swift */,
@@ -416,6 +419,7 @@
 				3228B3853B228943B75D3F80 /* DuoCrypto.swift in Sources */,
 				00866AF08AD74C9EE6BE79B0 /* FoldAware.swift in Sources */,
 				A159F20D5ACA90F41D1BB364 /* FolderPicker.swift in Sources */,
+				7C2F0CD17A64FAC9950616A2 /* GoalBar.swift in Sources */,
 				FC732131553EE35AB75BB41B /* Haptics.swift in Sources */,
 				EF8397EC0DD99F1BC88E9573 /* HostStore.swift in Sources */,
 				43FC4A48B8F4D08272381431 /* ItemViews.swift in Sources */,

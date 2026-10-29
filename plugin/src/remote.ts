@@ -31,6 +31,13 @@ const FALLBACK_WIRE: Record<string, readonly string[]> = {
   'directoryPicker/list': ['path'],
   'permissionPresets/catalog': [],
   'userQuestions/answer': ['agentId', 'callId', 'answer'],
+  'goals/get': ['agentId'],
+  'goals/edit': ['agentId', 'ref', 'request'],
+  'goals/pause': ['agentId', 'ref'],
+  'goals/resume': ['agentId', 'ref'],
+  'goals/clear': ['agentId', 'ref'],
+  'subagents/prompt': ['request'],
+  'subagents/interruptByParent': ['childSessionId', 'parentSessionId', 'mode'],
 }
 
 export class RemoteFailure extends Error {

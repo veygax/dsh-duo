@@ -39,6 +39,8 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - **Sessions on the left.** A `NavigationSplitView` sidebar groups sessions by workspace with live running and
   waiting-for-you badges, search, swipe-to-rename and context menus. On the inner display it sits beside the open session;
   on the outer display it collapses to one column.
+- **Subagents in place.** Delegated conversations nest under the session that started them, with their own mode,
+  running badge and transcript. A continuable child takes follow-ups; a finished one-shot child opens read-only.
 - **Detail pane.** On the open inner display with the sidebar hidden, tapping a thought or tool call opens it in full
   in a pane on the right; swipe it away or tap ✕ to close it. Elsewhere they expand inline.
 - **Models and thinking levels.** A composer chip lists every provider's models from the Host's catalog, with the
@@ -57,6 +59,8 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
   app; the Notification Service Extension decrypts them on the phone. No Apple key ever reaches the shared relay.
 - **Questions.** DeepSeek's `ask_user_question` appears as a card above the composer. A single choice answers in one
   tap.
+- **Goals above the composer.** The current objective sits in a compact strip with its phase and round budget, and its
+  menu can pause, resume, edit or clear it. A blocked goal explains why; a completed goal steps aside.
 - **Haptics on every button.** Taps, selections, success, warning, error, and a two-beat "attention" pattern for
   questions.
 

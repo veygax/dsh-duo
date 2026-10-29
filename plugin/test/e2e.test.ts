@@ -63,12 +63,29 @@ const listeners = new Map<string, Array<(...args: never[]) => unknown>>()
 const followFeed = new Feed<Record<string, unknown>>()
 const commands: Array<{ name: string }> = []
 
+const goal = {
+  goal: { id: 'goal-1', revision: 1, objective: 'Ship the login fix with a regression test', phase: 'active', maxGoalRounds: 8 },
+  roundsStarted: 2,
+  createdAt: 100,
+  updatedAt: 900,
+}
+
 const summary = {
   sessionId: 'sess-1', agentAvailable: true, updatedAt: 1000, running: false, blank: false, cwd: '/work/app',
   projections: { kind: 'sequenced', asOfSeq: 9, values: {
     title: 'Fix the login bug',
     agentPreset: 'standard',
     modelSelection: { next: { provider: 'deepseek', model: 'deepseek-v4', reasoningEffort: 'high' }, lastUsed: null },
+    goal,
+  } },
+}
+
+const subagentSummary = {
+  sessionId: 'sess-sub', agentAvailable: true, updatedAt: 900, running: false, blank: false, cwd: '/work/app',
+  parentSessionId: 'sess-1', origin: 'subagent',
+  projections: { kind: 'sequenced', asOfSeq: 9, values: {
+    title: 'Triage the login race',
+    subagent: { mode: 'continuable', label: 'Login triage' },
   } },
 }
 
@@ -97,7 +114,7 @@ const ctx: HostContext = {
               { code: 'gateway/service-unavailable' },
             )
           }
-          return { items: [summary] }
+          return { items: [summary, subagentSummary] }
         case 'agentPresets/list': return { presets: [
           { id: 'standard', name: 'Standard', isDefault: true }, { id: 'ptc', name: 'PTC' },
           { id: 'minimal', name: 'Minimal' }, { id: 'cordis', name: 'Creator' },
@@ -117,6 +134,15 @@ const ctx: HostContext = {
           commands.push({ name: String(request.args.line) })
           return String(request.args.line).startsWith('/compact') ? { commandId: 'c1', result: { kind: 'success', text: 'Compacted' } } : undefined
         case 'session/prompt': return { accepted: true }
+        case 'goals/get': {
+          if (request.args.agentId !== 'sess-1') return undefined
+          return { ...goal.goal, roundsStarted: goal.roundsStarted, createdAt: goal.createdAt, updatedAt: goal.updatedAt, activation: 'armed' }
+        }
+        case 'goals/pause': {
+          if (request.args.agentId !== 'sess-1') throw Object.assign(new Error('unknown agent'), { code: 'goals/unknown' })
+          return { ...goal.goal, phase: 'paused', revision: 2, roundsStarted: goal.roundsStarted, createdAt: goal.createdAt, updatedAt: Date.now(), activation: 'disarmed' }
+        }
+        case 'subagents/prompt': return { messageId: 'msg-1' }
         case 'agentPresets/select': return request.args.agentPreset
         default: throw Object.assign(new Error(`unexpected ${endpoint}`), { code: 'test/unexpected' })
       }
@@ -266,6 +292,13 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.deepEqual(value.presets.map(preset => preset.id), ['standard', 'ptc', 'minimal', 'cordis'])
   assert.equal(value.sessions[0]!.title, 'Fix the login bug')
   assert.deepEqual(value.sessions[0]!.model, { provider: 'deepseek', model: 'deepseek-v4', effort: 'high' })
+  assert.deepEqual(value.sessions[0]!.goal, {
+    id: 'goal-1', revision: 1, objective: 'Ship the login fix with a regression test', phase: 'active',
+    roundsStarted: 2, maxGoalRounds: 8,
+  })
+  const child = value.sessions.find(session => typeof session.parentId === 'string')
+  assert.equal(child?.parentId, 'sess-1')
+  assert.deepEqual(child?.subagent, { mode: 'continuable', label: 'Login triage' })
 
   // The first list lost the activation race; the plugin retried it instead of caching the error.
   assert.equal(calls.filter(call => call.namespace === 'session' && call.method === 'list').length, 2)
@@ -274,10 +307,13 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.deepEqual(calls.find(call => call.method === 'list' && call.namespace === 'session')?.args, { _request: {} })
 
   const opened = await phone.call('session.open', { sessionId: 'sess-1' })
-  const items = (opened.value as { items: Array<Record<string, unknown>> }).items
+  const openedValue = opened.value as { items: Array<Record<string, unknown>>; session: { goal?: Record<string, unknown> } }
+  const items = openedValue.items
   assert.deepEqual(items.map(item => item.kind), ['user', 'thinking', 'text', 'tool', 'turn'])
   assert.equal(items[3]!.status, 'ok')
   assert.equal(items[3]!.result, 'export function login() {}')
+  // Activation is process-local, so opening reads it beside the projection.
+  assert.equal(openedValue.session.goal?.activation, 'armed')
 
   // Live streaming arrives as coalesced deltas.
   followFeed.push({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'att-1', revision: 1, startedAfterSeq: 5, turn: 2, step: 1 } })
@@ -308,6 +344,25 @@ test('a paired phone drives the Host through the relay', async () => {
   // Mode switching.
   const preset = await phone.call('session.preset', { sessionId: 'sess-1', preset: 'cordis' })
   assert.deepEqual(preset.value, { preset: 'cordis' })
+
+  // A goal mutation carries the projected CAS ref and returns a fresh view.
+  const paused = await phone.call('session.goal.pause', { sessionId: 'sess-1', goalId: 'goal-1', revision: 1 })
+  assert.equal((paused.value as Record<string, unknown>).phase, 'paused')
+  assert.equal((paused.value as Record<string, unknown>).activation, 'disarmed')
+
+  // A continuable child takes a prompt through its exact parent address.
+  const childPrompt = await phone.call('session.prompt', { sessionId: 'sess-sub', text: 'Keep digging' })
+  assert.deepEqual(childPrompt.value, { kind: 'prompt' })
+  const routed = calls.findLast(call => call.namespace === 'subagents' && call.method === 'prompt')
+  assert.ok(routed)
+  assert.deepEqual(routed.args.request, {
+    requestId: (routed.args.request as Record<string, unknown>).requestId,
+    parentSessionId: 'sess-1',
+    childSessionId: 'sess-sub',
+    mode: 'continuable',
+    delivery: 'queue',
+    content: [{ type: 'text', text: 'Keep digging' }],
+  })
 
   // DeepSeek asks a question; the phone answers it before any Web client does.
   let webNext: (() => void) | undefined

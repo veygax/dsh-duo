@@ -98,6 +98,11 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `session.model` | `sessionId`, `provider`, `model`, `effort?` | `ModelSelection` |
 | `session.preset` | `sessionId`, `preset` | `{ preset }` |
 | `session.rename` | `sessionId`, `title` | — |
+| `session.goal` | `sessionId` | `Goal \| null` |
+| `session.goal.edit` | `sessionId`, `goalId`, `revision`, `objective` | `Goal` |
+| `session.goal.pause` | `sessionId`, `goalId`, `revision` | `Goal` |
+| `session.goal.resume` | `sessionId`, `goalId`, `revision` | `Goal` |
+| `session.goal.clear` | `sessionId`, `goalId`, `revision` | `null` |
 | `models.catalog` | — | `{ default, groups: [{ id, name, models: [{ id, name, description?, efforts: [{ id, name }], defaultEffort? }] }] }` |
 | `commands.list` | `sessionId` | `[{ name, description, hint?, kind: "command"\|"skill" }]` |
 | `push.register` | `token`, `env: "sandbox"\|"production"`, `topic` | `{ enabled }` |
@@ -119,7 +124,20 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 ### Shapes
 
 ```ts
-Session = { id, title, updatedAt, running, blank, cwd?, workspaceId?, preset?, model?: { provider, model, effort? }, questions: number, parentId? }
+Session = {
+  id, title, updatedAt, running, blank, cwd?, workspaceId?, preset?,
+  model?: { provider, model, effort? }, questions: number,
+  parentId?,                                     // set when dsh recorded a parent Session
+  subagent?: { mode: "one-shot" | "continuable" | "external" | "unknown", label? },
+  goal?: Goal,
+}
+Goal = {
+  id, revision, objective,
+  phase: "active" | "paused" | "blocked" | "complete",
+  blockedReason?: { code, message },
+  roundsStarted, maxGoalRounds,
+  activation?: "armed" | "disarmed",             // process-local, when the Host reports it
+}
 Workspace = { id, title, path, sessionIds: string[] }
 Item =
   | { id, kind: "user", text, time }
@@ -133,3 +151,7 @@ Question = { id, question, header?, detail?, options: [{ label, description? }],
 ```
 
 Push payload (sealed in `e`): `{ kind: "turn"|"question", sessionId, title, body, callId?, questions? }`
+
+Subagent Sessions appear in `sessions.list` like any other Session, with `parentId` and `subagent` set, so the
+picker can nest them under their parent. `session.prompt` and `session.cancel` route a continuable child through
+`subagents/prompt` and `subagents/interruptByParent`; a finished one-shot child is read-only.

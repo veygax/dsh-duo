@@ -26,6 +26,23 @@ export interface QuestionView {
   }[]
 }
 
+export interface SubagentView {
+  mode: 'one-shot' | 'continuable' | 'external' | 'unknown'
+  label?: string
+}
+
+/** The durable `goal` projection, with process-local activation when the Host has told us. */
+export interface GoalView {
+  id: string
+  revision: number
+  objective: string
+  phase: 'active' | 'paused' | 'blocked' | 'complete'
+  blockedReason?: { code: string; message: string }
+  roundsStarted: number
+  maxGoalRounds: number
+  activation?: 'armed' | 'disarmed'
+}
+
 export interface SessionView {
   id: string
   title: string
@@ -39,7 +56,12 @@ export interface SessionView {
   /** The permission preset in effect (`workspace-write`, `danger-full-access`, `auto`, or `custom`). */
   permission?: string
   questions: number
+  /** The Session this one was delegated from, when dsh recorded a parent. */
   parentId?: string
+  /** Present on subagent conversations; mode is `continuable` when they accept follow-ups. */
+  subagent?: SubagentView
+  /** The current goal, while one is set and not completed. */
+  goal?: GoalView
 }
 
 export interface WorkspaceView {
@@ -53,6 +75,52 @@ type Json = Record<string, unknown>
 
 function obj(value: unknown): Json | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Json : undefined
+}
+
+function subagentOf(origin: unknown, identityValue: unknown): SubagentView | undefined {
+  const identity = obj(identityValue)
+  if (origin !== 'subagent' && identity === undefined) return undefined
+  const mode = identity?.mode
+  return {
+    mode: mode === 'one-shot' || mode === 'continuable' || mode === 'external' || mode === 'unknown'
+      ? mode
+      : 'unknown',
+    ...typeof identity?.label === 'string' && identity.label !== '' ? { label: identity.label } : {},
+  }
+}
+
+interface GoalActivation {
+  id: string
+  revision: number
+  activation: 'armed' | 'disarmed'
+}
+
+function goalOf(value: unknown, activation: GoalActivation | undefined): GoalView | undefined {
+  const projection = obj(value)
+  const goal = obj(projection?.goal)
+  if (goal === undefined
+    || typeof goal.id !== 'string' || goal.id === ''
+    || typeof goal.revision !== 'number' || !Number.isInteger(goal.revision) || goal.revision < 1
+    || typeof goal.objective !== 'string' || goal.objective === ''
+    || typeof goal.maxGoalRounds !== 'number' || !Number.isInteger(goal.maxGoalRounds) || goal.maxGoalRounds < 1) return undefined
+  const phase = goal.phase
+  if (phase !== 'active' && phase !== 'paused' && phase !== 'blocked' && phase !== 'complete') return undefined
+  const rounds = typeof projection?.roundsStarted === 'number' ? projection.roundsStarted : 0
+  const blocker = obj(goal.blockedReason)
+  return {
+    id: goal.id,
+    revision: goal.revision,
+    objective: goal.objective,
+    phase,
+    roundsStarted: Number.isInteger(rounds) && rounds >= 0 ? rounds : 0,
+    maxGoalRounds: goal.maxGoalRounds,
+    ...typeof blocker?.code === 'string' && typeof blocker.message === 'string'
+      ? { blockedReason: { code: blocker.code, message: blocker.message } }
+      : {},
+    ...activation !== undefined && activation.id === goal.id && activation.revision === goal.revision
+      ? { activation: activation.activation }
+      : {},
+  }
 }
 
 function modelOf(value: unknown): ModelRef | undefined {
@@ -122,6 +190,8 @@ export class Directory {
   private readonly entries = new Map<string, Entry>()
   private workspaceList: WorkspaceView[] = []
   private readonly workspaceOf = new Map<string, string>()
+  /** Process-local `armed`/`disarmed`, keyed by Session; never part of the durable projection. */
+  private readonly goalActivations = new Map<string, GoalActivation>()
   private archived = new Set<string>()
   private readonly dirty = new Set<string>()
   private flushTimer: ReturnType<typeof setTimeout> | undefined
@@ -300,6 +370,21 @@ export class Directory {
     this.markDirty(sessionId)
   }
 
+  /** Update the process-local goal activation the Host just announced. */
+  setGoalActivation(sessionId: string, goal: Json | null | undefined): void {
+    if (goal === null || goal === undefined) this.goalActivations.delete(sessionId)
+    else if (typeof goal.id === 'string'
+      && typeof goal.revision === 'number'
+      && (goal.activation === 'armed' || goal.activation === 'disarmed')) {
+      this.goalActivations.set(sessionId, {
+        id: goal.id,
+        revision: goal.revision,
+        activation: goal.activation,
+      })
+    }
+    this.markDirty(sessionId)
+  }
+
   private patch(sessionId: string, values: Json): void {
     let entry = this.entries.get(sessionId)
     if (entry === undefined) {
@@ -327,17 +412,19 @@ export class Directory {
 
   view(sessionId: string): SessionView | undefined {
     const entry = this.entries.get(sessionId)
-    if (entry === undefined || entry.summary.origin === 'subagent' || this.archived.has(sessionId)) return undefined
+    if (entry === undefined || this.archived.has(sessionId)) return undefined
     const { summary, values } = entry
+    const subagent = subagentOf(summary.origin, values.subagent)
     const title = typeof values.title === 'string' && values.title.trim() !== '' ? values.title : undefined
     const cwd = typeof summary.cwd === 'string' ? summary.cwd
       : typeof values.workingDirectory === 'string' ? values.workingDirectory : undefined
     const model = modelOf(values.modelSelection)
     const permission = obj(values.permissions)?.currentValue
     const blank = summary.blank === true
+    const goal = goalOf(values.goal, this.goalActivations.get(sessionId))
     return {
       id: sessionId,
-      title: title ?? (blank ? 'New session' : 'Untitled session'),
+      title: title ?? subagent?.label ?? (subagent === undefined ? (blank ? 'New session' : 'Untitled session') : 'Subagent'),
       updatedAt: typeof summary.updatedAt === 'number' ? summary.updatedAt : 0,
       running: summary.running === true,
       blank,
@@ -348,6 +435,8 @@ export class Directory {
       ...typeof permission === 'string' && permission !== '' ? { permission } : {},
       questions: questionsOf(values.userQuestions).length,
       ...typeof summary.parentSessionId === 'string' ? { parentId: summary.parentSessionId } : {},
+      ...subagent === undefined ? {} : { subagent },
+      ...goal === undefined ? {} : { goal },
     }
   }
 
