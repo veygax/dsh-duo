@@ -94,7 +94,7 @@ for d in json.load(open(sys.argv[1]))["result"]["devices"]:
   rm -f "$json"
   [[ -n $device ]] || { echo "No iPhone connected. Plug it in, unlock it, or pass --device." >&2; exit 1; }
 fi
-echo "Installing on $device…"
+echo "Installing on ${device}…"
 xcrun devicectl device install app --device "$device" "$archive/Products/Applications/DSHDuo.app"
 if xcrun devicectl device process launch --device "$device" "$bundle" >/dev/null 2>&1; then
   echo "Launched DSH Duo."
