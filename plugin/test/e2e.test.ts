@@ -57,6 +57,10 @@ class Feed<T> implements AsyncIterable<T> {
 }
 
 const calls: InvokeRemoteRequest[] = []
+/** Queue mutations this fake Host received. */
+const updateQueues: Record<string, unknown>[] = []
+/** The live control stream, so a test can push a projection. */
+let controlFeed: Feed<unknown> | undefined
 /** Bytes behind every content-addressed attachment this fake Host knows. */
 const attachmentData = new Map<string, Uint8Array>()
 /** The Host activates its Session service after the plugin applies; the first list loses that race. */
@@ -150,6 +154,10 @@ const ctx: HostContext = {
           commands.push({ name: String(request.args.line) })
           return String(request.args.line).startsWith('/compact') ? { commandId: 'c1', result: { kind: 'success', text: 'Compacted' } } : undefined
         case 'session/prompt': return { accepted: true }
+        case 'session/updateQueue': {
+          updateQueues.push(request.args.request as Record<string, unknown>)
+          return { accepted: true }
+        }
         case 'goals/get': {
           if (request.args.agentId !== 'sess-1') return undefined
           return { ...goal.goal, roundsStarted: goal.roundsStarted, createdAt: goal.createdAt, updatedAt: goal.updatedAt, activation: 'armed' }
@@ -171,7 +179,10 @@ const ctx: HostContext = {
         return followFeed
       }
       const feed = new Feed<unknown>()
-      if (endpoint === 'session/control') feed.push({ type: 'baseline', value: { projections: {} } })
+      if (endpoint === 'session/control') {
+        controlFeed = feed
+        feed.push({ type: 'baseline', value: { projections: {} } })
+      }
       if (endpoint === 'workspace/follow') {
         feed.push({ type: 'baseline', value: { items: [{ workspaceId: 'ws-1', path: '/work/app', title: 'app', sessionIds: ['sess-1'] }], archivedSessionIds: [], pinnedSessionIds: [] } })
       }
@@ -401,6 +412,26 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.deepEqual(imagePrompt.content, [
     { type: 'image', mediaType: 'image/png', data: imageBytes.toString('base64'), name: 'shot.png' },
   ])
+
+  // A client-minted prompt id lets the phone withdraw a queued prompt from dsh's inbox.
+  const queuedPrompt = await phone.call('session.prompt', {
+    sessionId: 'sess-1', text: 'Wait for me', requestId: 'req-queued-1',
+  })
+  assert.deepEqual(queuedPrompt.value, { kind: 'prompt' })
+  const queuedRequest = calls.findLast(call => call.namespace === 'session' && call.method === 'prompt')!.args.request as Record<string, unknown>
+  assert.equal(queuedRequest.requestId, 'req-queued-1')
+
+  controlFeed!.push({ type: 'projection', sessionId: 'sess-1', key: 'inbox', value: {
+    'next-turn': [{ id: 'queue-1', role: 'user', source: { kind: 'user', rpcId: 'req-queued-1' }, content: [{ type: 'text', text: 'Wait for me' }] }],
+    'next-step': [],
+  } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  const withdrawn = await phone.call('session.queue.remove', { sessionId: 'sess-1', requestId: 'req-queued-1' })
+  assert.deepEqual(withdrawn.value, { accepted: true })
+  assert.deepEqual(updateQueues.at(-1), { sessionId: 'sess-1', itemId: 'queue-1', action: { kind: 'remove' } })
+  const gone = await phone.call('session.queue.remove', { sessionId: 'sess-1', requestId: 'req-unknown-1' })
+  assert.equal(gone.ok, false)
+  assert.equal((gone.error as { code: string }).code, 'duo/not-queued')
 
   // Durable attachments project into items, and their bytes read back a chunk at a time.
   const big = Buffer.alloc(1024 * 1024 + 32, 7)

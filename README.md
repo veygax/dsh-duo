@@ -50,6 +50,8 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - **Photos and files.** The paperclip attaches photos from the library or any file from the Files app. Images show as
   thumbnails in the conversation, files as named cards, and both open in QuickLook; Markdown images in replies are
   drawn as pictures too. Attachments upload in relay-sized chunks, so a large screenshot or log arrives intact.
+- **Withdraw a queued message.** A message sent while a turn runs waits as a quiet bubble; press and hold it to cancel
+  before DeepSeek starts on it.
 - **Regular, PTC, Minimal and Creator modes.** These map to dsh's `standard`, `ptc`, `minimal` and `cordis` agent
   presets, plus any custom presets. dsh fixes a session's mode at its first turn, so picking a new mode on a started
   session offers a new session in the same folder.

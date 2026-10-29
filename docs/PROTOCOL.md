@@ -93,7 +93,8 @@ Events (Host → Device): `{ "ev": "<name>", ... }`
 | `session.open` | `sessionId` | `{ session, items: Item[], hasMore }` then `session.items`/`session.live` events |
 | `session.older` | `sessionId` (open) | `{ items: Item[], hasMore }`: the page before the oldest item held, read with dsh's `session/page`; the phone reads every page in the background right after `session.open` |
 | `session.close` | `sessionId` | — |
-| `session.prompt` | `sessionId`, `text?`, `mode: "queue"\|"steer"`, `uploads?: string[]` | `{ kind: "prompt" \| "command" }` |
+| `session.prompt` | `sessionId`, `text?`, `requestId?`, `mode: "queue"\|"steer"`, `uploads?: string[]` | `{ kind: "prompt" \| "command" }` |
+| `session.queue.remove` | `sessionId`, `requestId` | `{ accepted: true }`; `duo/not-queued` once the turn has taken it in |
 | `attachment.upload` | `sessionId`, `kind: "image"\|"file"`, `name`, `mediaType?`, `data`, `uploadId?`, `offset?`, `done?` | `{ uploadId, received, done }` |
 | `attachment.discard` | `uploadId` | — |
 | `attachment.read` | `sessionId`, `attachmentId`, `offset?`, `length?` | `{ attachment, offset, data, next? }` |
@@ -181,6 +182,19 @@ Images and files in the durable log come back as `Attachment` values on their it
 `attachment.read` returns the stored bytes in chunks of at most 1 MiB, with `next` set to the
 offset of the following chunk and absent on the last one. Only an attachment the Session's own
 log names can be read. The phone renders an image from these bytes and opens a file in QuickLook.
+
+### Queued messages
+
+A prompt sent while a turn runs waits in dsh's inbox, and the phone shows it as a quiet bubble
+until the durable `user/message` event arrives. The phone mints the prompt's `requestId` and dsh
+records it as that message's `rpcId`; the Session's `inbox` projection lists each waiting item
+with its message `id` and `source.rpcId`.
+
+`session.queue.remove` finds the inbox item by `requestId` and issues dsh's
+`session/updateQueue` with action `remove`, which also retires any file receipts the prompt
+staged. If the turn already took the message in, the Host answers `duo/not-queued`; the phone
+retires its echo and lets the transcript show the message. The phone offers this from a hold on
+a queued bubble, and only while the submission is no longer in flight.
 
 Push payload (sealed in `e`): `{ kind: "turn"|"question", sessionId, title, body, callId?, questions? }`
 

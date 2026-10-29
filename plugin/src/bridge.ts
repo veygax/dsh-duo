@@ -631,9 +631,11 @@ export class Bridge {
         if (text.trim() === '' && uploads.length === 0) {
           throw new RemoteFailure('duo/bad-request', 'A message needs text or an attachment')
         }
-        return await this.prompt(device, str(m.sessionId, 'sessionId'), text,
+        return await this.prompt(device, str(m.sessionId, 'sessionId'), promptRequestId(m.requestId), text,
           m.mode === 'steer' ? 'steer' : 'queue', typeof m.timeZone === 'string' ? m.timeZone : undefined, uploads)
       }
+      case 'session.queue.remove':
+        return await this.removeQueued(str(m.sessionId, 'sessionId'), str(m.requestId, 'requestId'))
       case 'attachment.upload':
         return await this.upload(device, m)
       case 'attachment.discard':
@@ -797,6 +799,7 @@ export class Bridge {
   private async prompt(
     device: string,
     sessionId: string,
+    requestId: string,
     text: string,
     mode: 'queue' | 'steer',
     timeZone: string | undefined,
@@ -829,7 +832,7 @@ export class Bridge {
           throw new RemoteFailure('duo/unsupported', 'Subagent conversations accept images, not files')
         }
         await this.remote.call('subagents/prompt', {
-          requestId: randomUUID(),
+          requestId,
           parentSessionId: session.parentId,
           childSessionId: sessionId,
           mode: 'continuable',
@@ -841,7 +844,7 @@ export class Bridge {
         return { kind: 'prompt' }
       }
       await this.remote.call('session/prompt', {
-        requestId: randomUUID(),
+        requestId,
         sessionId,
         mode,
         content,
@@ -852,6 +855,52 @@ export class Bridge {
     } finally {
       // A failed send keeps the staged bytes, so the phone can retry with the same upload ids.
       if (sent) for (const uploadId of uploadIds) this.discardUpload(device, uploadId)
+    }
+  }
+
+  /**
+   * Withdraw one prompt still waiting in the Agent's inbox. dsh identifies a queued
+   * occurrence by its message id; the phone knows the client-minted request id it sent,
+   * and the inbox projection carries both.
+   */
+  private async removeQueued(sessionId: string, requestId: string): Promise<{ accepted: true }> {
+    const itemId = await this.queuedItemId(sessionId, requestId)
+    if (itemId === undefined) {
+      throw new RemoteFailure('duo/not-queued', 'That message is no longer waiting')
+    }
+    try {
+      await this.remote.call('session/updateQueue', {
+        sessionId,
+        itemId,
+        action: { kind: 'remove' },
+      })
+    } catch (error) {
+      if (error instanceof RemoteFailure && error.code === 'session/queue-item-not-found') {
+        throw new RemoteFailure('duo/not-queued', 'That message is no longer waiting')
+      }
+      throw error
+    }
+    return { accepted: true }
+  }
+
+  /**
+   * The inbox item a request id became. The control projection can trail the prompt's
+   * acceptance by a frame, so a hold immediately after send waits briefly rather than
+   * reporting a message as already taken in when it is still queued.
+   */
+  private async queuedItemId(sessionId: string, requestId: string): Promise<string | undefined> {
+    const deadline = Date.now() + 2_000
+    for (;;) {
+      const inbox = this.directory.inbox(sessionId)
+      const queued = [...inbox.nextTurn, ...inbox.nextStep].find((raw) => {
+        const message = obj(raw)
+        const source = obj(message?.source)
+        return source?.kind === 'user' && source.rpcId === requestId
+      })
+      const itemId = obj(queued)?.id
+      if (typeof itemId === 'string' && itemId !== '') return itemId
+      if (Date.now() >= deadline) return undefined
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 
@@ -1375,6 +1424,11 @@ const APPROVAL_DENY = 'Deny'
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
+}
+
+/** The client-minted identity dsh persists as a queued message's rpcId, or a fresh one. */
+function promptRequestId(value: unknown): string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{8,200}$/.test(value) ? value : randomUUID()
 }
 
 /** Decode a wire base64 field, rejecting the non-canonical forms the Host's validators refuse. */

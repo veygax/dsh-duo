@@ -111,7 +111,11 @@ struct TranscriptView: View {
                 }
 
                 ForEach(model.pending) { message in
-                    PendingBubble(message: message, running: session?.running == true)
+                    PendingBubble(
+                        message: message,
+                        running: session?.running == true,
+                        canCancel: !message.steer && !model.sending && store.connection == .online,
+                        cancel: { Task { await store.cancelQueued(message, in: model) } })
                         .id(message.id)
                 }
 

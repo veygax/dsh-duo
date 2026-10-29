@@ -448,6 +448,15 @@ export class Directory {
     return questionsOf(this.entries.get(sessionId)?.values.userQuestions)
   }
 
+  /** Pending agent input, reconstructed by dsh from its durable inbox splices. */
+  inbox(sessionId: string): { nextTurn: unknown[]; nextStep: unknown[] } {
+    const inbox = obj(this.entries.get(sessionId)?.values.inbox)
+    return {
+      nextTurn: Array.isArray(inbox?.['next-turn']) ? inbox['next-turn'] as unknown[] : [],
+      nextStep: Array.isArray(inbox?.['next-step']) ? inbox['next-step'] as unknown[] : [],
+    }
+  }
+
   sessions(): SessionView[] {
     return [...this.entries.keys()]
       .flatMap(id => this.view(id) ?? [])

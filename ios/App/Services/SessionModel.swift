@@ -89,8 +89,9 @@ final class SessionModel: Identifiable {
         if let tools = try? delta["tools"]?.decode([LiveTool].self) { live?.tools = tools }
     }
 
-    func addPending(_ text: String, steer: Bool, attachments: [PendingAttachment] = []) -> PendingMessage.ID {
-        let message = PendingMessage(text: text, steer: steer, attachments: attachments)
+    func addPending(_ text: String, steer: Bool, attachments: [PendingAttachment] = [],
+                    requestId: String = UUID().uuidString.lowercased()) -> PendingMessage.ID {
+        let message = PendingMessage(text: text, steer: steer, attachments: attachments, requestId: requestId)
         pending.append(message)
         return message.id
     }
@@ -147,4 +148,6 @@ struct PendingMessage: Identifiable {
     let steer: Bool
     /// What was attached; their thumbnails show until dsh records the message.
     var attachments: [PendingAttachment] = []
+    /// The client-minted identity dsh records as the queued message's rpcId.
+    let requestId: String
 }

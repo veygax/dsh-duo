@@ -39,6 +39,7 @@ const FALLBACK_WIRE: Record<string, readonly string[]> = {
   'subagents/prompt': ['request'],
   'subagents/interruptByParent': ['childSessionId', 'parentSessionId', 'mode'],
   'session/attachment': ['request'],
+  'session/updateQueue': ['request'],
   'fileUploads/upload': ['agentId', 'request'],
 }
 

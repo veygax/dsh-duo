@@ -124,8 +124,9 @@ struct AttachmentModelTests {
         let model = SessionModel(id: "s")
         model.load(items: [], live: nil, hasMore: false)
         let pending = PendingAttachment(kind: .image, name: "a.png", bytes: 10, thumbnail: nil)
-        _ = model.addPending("", steer: false, attachments: [pending])
+        _ = model.addPending("", steer: false, attachments: [pending], requestId: "req-queued-1")
         #expect(model.pending.count == 1)
+        #expect(model.pending.first?.requestId == "req-queued-1")
 
         let item = TranscriptItem(id: "u1", kind: .user, time: 1, text: "", attachments: [
             TranscriptAttachment(kind: .image, attachmentId: "sha256:aa", name: "a.png",

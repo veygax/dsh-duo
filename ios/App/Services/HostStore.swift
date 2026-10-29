@@ -401,8 +401,9 @@ final class HostStore {
         guard let client, !trimmed.isEmpty || !attachments.isEmpty else { return false }
         model.sending = true
         defer { model.sending = false }
+        let requestId = UUID().uuidString.lowercased()
         let echo = sessions[model.id]?.running == true && !trimmed.hasPrefix("/")
-            ? model.addPending(trimmed, steer: steer, attachments: attachments.map(\.pending)) : nil
+            ? model.addPending(trimmed, steer: steer, attachments: attachments.map(\.pending), requestId: requestId) : nil
         var uploads: [String] = []
         do {
             for draft in attachments {
@@ -410,6 +411,7 @@ final class HostStore {
             }
             var params: [String: Any] = [
                 "sessionId": model.id,
+                "requestId": requestId,
                 "mode": steer ? "steer" : "queue",
                 "timeZone": TimeZone.current.identifier,
             ]
@@ -433,6 +435,30 @@ final class HostStore {
             Haptics.error()
             show(error)
             return false
+        }
+    }
+
+    /// Withdraw one message still waiting in dsh's inbox, before the turn takes it in.
+    func cancelQueued(_ message: PendingMessage, in model: SessionModel) async {
+        guard let client else { return }
+        do {
+            _ = try await client.request("session.queue.remove", [
+                "sessionId": model.id,
+                "requestId": message.requestId,
+            ], timeout: .seconds(30))
+            withAnimation(.snappy) { model.dropPending(message.id) }
+            Haptics.success()
+        } catch {
+            let remote = error as? RemoteError
+            if remote?.code == "duo/not-queued" {
+                // The turn already took it in: the transcript is about to show it, so retire the echo.
+                withAnimation(.snappy) { model.dropPending(message.id) }
+                Haptics.warning()
+                banner = Banner(title: "Already sent", message: "DeepSeek has already started on that message.")
+            } else {
+                Haptics.error()
+                show(error)
+            }
         }
     }
 

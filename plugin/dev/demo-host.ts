@@ -75,7 +75,9 @@ interface DemoSession {
   parentId?: string
   subagent?: Json
   /** Prompts sent with mode "queue" during a turn; each runs as its own turn afterwards. */
-  queued?: Array<{ prompt: string; content: Json[] }>
+  queued?: Array<{ prompt: string; content: Json[]; requestId: string; itemId: string }>
+  /** The Agent inbox projection: prompts dsh has accepted but not yet started. */
+  inbox?: Json[]
 }
 
 type DemoAttachment = {
@@ -269,6 +271,7 @@ function values(id: string): Json {
     permissions: { currentValue: entry.permission },
     goal: entry.goal ?? null,
     subagent: entry.subagent ?? null,
+    inbox: { 'next-turn': entry.inbox ?? [], 'next-step': [] },
   }
 }
 
@@ -306,8 +309,15 @@ async function stream(id: string, attemptId: string, kind: 'reasoning-delta' | '
   }
 }
 
-async function runTurn(id: string, prompt: string, content?: Json[]): Promise<void> {
+async function runTurn(id: string, prompt: string, content?: Json[], requestId?: string): Promise<void> {
   const entry = sessions.get(id)!
+  if (requestId !== undefined && entry.inbox !== undefined) {
+    entry.inbox = entry.inbox.filter((item) => {
+      const source = item.source as Json | undefined
+      return source?.rpcId !== requestId
+    })
+    projection(id, 'inbox', { 'next-turn': entry.inbox, 'next-step': [] })
+  }
   const turn = ++entry.turn
   entry.summary = { ...entry.summary, running: true, blank: false, updatedAt: Date.now() }
   if (entry.title === 'New session') {
@@ -368,7 +378,7 @@ async function runTurn(id: string, prompt: string, content?: Json[]): Promise<vo
   entry.summary = { ...entry.summary, running: false, updatedAt: Date.now() }
   emit('api-session/status', id, false)
   const next = entry.queued?.shift()
-  if (next !== undefined) void runTurn(id, next.prompt, next.content)
+  if (next !== undefined) void runTurn(id, next.prompt, next.content, next.requestId)
 }
 
 const catalog = {
@@ -507,14 +517,32 @@ async function invoke(request: InvokeRemoteRequest): Promise<unknown> {
       const text = content.find(part => part.type === 'text')?.text
       const prompt = typeof text === 'string' ? text : 'Shared an attachment.'
       const entry = sessions.get(id)!
-      // Like dsh: a steer joins the running turn at its next step, a queued prompt waits for the turn to end.
+      const requestId = typeof req.requestId === 'string' ? req.requestId : `req-${randomUUID()}`
+      // Like dsh: a steer joins the running turn at its next step, a queued prompt waits in the inbox.
       if (entry.summary.running === true && req.mode === 'steer') {
         setTimeout(() => append(id, ev('user/message', { id: `m${seq}`, role: 'user', source: { kind: 'user-rpc' }, content }, Date.now())), 1500)
       } else if (entry.summary.running === true) {
-        (entry.queued ??= []).push({ prompt, content })
+        const itemId = `q-${randomUUID()}`
+        entry.inbox = [...entry.inbox ?? [], { id: itemId, role: 'user', source: { kind: 'user', rpcId: requestId }, content, time: Date.now() }]
+        projection(id, 'inbox', { 'next-turn': entry.inbox, 'next-step': [] })
+        ;(entry.queued ??= []).push({ prompt, content, requestId, itemId })
       } else {
         void runTurn(id, prompt, content)
       }
+      return { accepted: true }
+    }
+    case 'session/updateQueue': {
+      const id = String(req.sessionId)
+      const entry = sessions.get(id)
+      if (entry === undefined) throw Object.assign(new Error('session not found'), { code: 'session/not-found' })
+      const action = req.action as Json | undefined
+      if (action?.kind !== 'remove') throw Object.assign(new Error('only removal is simulated'), { code: 'gateway/bad-request' })
+      const itemId = String(req.itemId)
+      const removed = (entry.inbox ?? []).find(item => item.id === itemId)
+      if (removed === undefined) throw Object.assign(new Error('queued item is no longer pending'), { code: 'session/queue-item-not-found' })
+      entry.inbox = (entry.inbox ?? []).filter(item => item !== removed)
+      entry.queued = entry.queued?.filter(item => item.itemId !== itemId)
+      projection(id, 'inbox', { 'next-turn': entry.inbox, 'next-step': [] })
       return { accepted: true }
     }
     case 'fileUploads/upload': {

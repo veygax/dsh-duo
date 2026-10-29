@@ -74,8 +74,19 @@ struct UserBubble: View {
 struct PendingBubble: View {
     let message: PendingMessage
     let running: Bool
+    /// The Mac still holds this queued message, so a hold can withdraw it.
+    var canCancel = false
+    var cancel: (() -> Void)?
 
     var body: some View {
+        if canCancel, let cancel {
+            bubble.modifier(QueuedMessageMenu(cancel: cancel))
+        } else {
+            bubble
+        }
+    }
+
+    private var bubble: some View {
         VStack(alignment: .trailing, spacing: 4) {
             if !message.attachments.isEmpty {
                 HStack {
@@ -93,9 +104,16 @@ struct PendingBubble: View {
                         .background(Color.accentColor.gradient.opacity(0.55), in: .rect(cornerRadius: 20))
                 }
             }
-            Label(status, systemImage: running ? (message.steer ? "arrow.turn.down.right" : "clock") : "pause.circle")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Label(status, systemImage: running ? (message.steer ? "arrow.turn.down.right" : "clock") : "pause.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if canCancel {
+                    Text("· Hold to cancel")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -103,6 +121,21 @@ struct PendingBubble: View {
     private var status: String {
         if !running { return "Sends with your next message" }
         return message.steer ? "Steering this turn" : "Queued for after this turn"
+    }
+}
+
+/// The system's long-press menu: withdraw a queued message before the turn picks it up.
+private struct QueuedMessageMenu: ViewModifier {
+    let cancel: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                Button(role: .destructive, action: cancel) {
+                    Label("Cancel Queued Message", systemImage: "trash")
+                }
+            }
+            .accessibilityAction(named: "Cancel Queued Message") { cancel() }
     }
 }
 

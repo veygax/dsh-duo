@@ -64,7 +64,8 @@ The QR code carries the room secret, so the plugin never writes it into a sessio
   stores in `$DSH_HOME/duo-remote/apns.json`. The relay never holds Apple credentials.
 - `session.prompt` that starts with `/` goes through `commands/execute` first, the same way the Web composer does.
   A prompt to a continuable subagent goes through `subagents/prompt` with its exact parent address; Stop uses
-  `subagents/interruptByParent`. A finished one-shot child is rejected as read-only.
+  `subagents/interruptByParent`. A finished one-shot child is rejected as read-only. A prompt still waiting in the
+  Agent inbox can be withdrawn by its client-minted request id through dsh's `updateQueue`.
 - Takes images and files from the phone in relay-sized chunks (`attachment.upload`), admits them as dsh image content
   and file-upload receipts, and serves a message's stored bytes back for history (`attachment.read`). Attachments the
   Session's log references are the only ones it will read.
