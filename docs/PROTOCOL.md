@@ -198,6 +198,11 @@ a queued bubble, and only while the submission is no longer in flight.
 
 Push payload (sealed in `e`): `{ kind: "turn"|"question", sessionId, title, body, callId?, questions? }`
 
+A turn the user stopped still produces `turn.finished` for connected phones, with `reason: "aborted"`, but it is never
+sent as a push. Completed, error, and interrupted turns are.
+
 Subagent Sessions appear in `sessions.list` like any other Session, with `parentId` and `subagent` set, so the
-picker can nest them under their parent. `session.prompt` and `session.cancel` route a continuable child through
-`subagents/prompt` and `subagents/interruptByParent`; a finished one-shot child is read-only.
+picker can nest them under their parent. A subagent's history must be read with the Session API's subagent address,
+`{ kind: "subagent", parentSessionId, childSessionId, mode }`; the plain `{ kind: "session", sessionId }` address is
+rejected. `session.prompt` and `session.cancel` route a continuable child through `subagents/prompt` and
+`subagents/interruptByParent`; a finished one-shot child is read-only.

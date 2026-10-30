@@ -67,6 +67,7 @@ const attachmentData = new Map<string, Uint8Array>()
 let sessionListFailures = 1
 const listeners = new Map<string, Array<(...args: never[]) => unknown>>()
 const followFeed = new Feed<Record<string, unknown>>()
+const childFollowFeed = new Feed<Record<string, unknown>>()
 const commands: Array<{ name: string }> = []
 
 const goal = {
@@ -95,6 +96,13 @@ const subagentSummary = {
   } },
 }
 
+let snapshotHistory: Array<Record<string, unknown>>
+
+const stoppedSummary = {
+  sessionId: 'sess-stop', agentAvailable: true, updatedAt: 800, running: false, blank: false, cwd: '/work/app',
+  projections: { kind: 'sequenced', asOfSeq: 9, values: { title: 'Stop this turn' } },
+}
+
 const history = [
   { type: 'event', event: { type: 'turn/start', seq: 1, time: 100, data: { turn: 1 } } },
   { type: 'event', event: { type: 'user/message', seq: 2, time: 101, data: { id: 'm1', role: 'user', source: { kind: 'user', rpcId: 'r' }, content: [{ type: 'text', text: 'Why does login fail?' }] } } },
@@ -105,6 +113,13 @@ const history = [
   ] } } } },
   { type: 'event', event: { type: 'tool/result', seq: 4, time: 103, data: { turn: 1, step: 1, message: { id: 'm3', role: 'tool', toolCallId: 'call-1', content: [{ type: 'text', text: 'export function login() {}' }] } } } },
   { type: 'event', event: { type: 'turn/end', seq: 5, time: 104, data: { turn: 1, reason: { kind: 'completed' } } } },
+]
+snapshotHistory = history
+
+/** A turn the user stopped: dsh records an `aborted` end with a user cancellation cause. */
+const stoppedHistory = [
+  ...history.slice(0, -1),
+  { type: 'event', event: { type: 'turn/end', seq: 5, time: 104, data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } } } },
 ]
 
 const ctx: HostContext = {
@@ -158,6 +173,7 @@ const ctx: HostContext = {
           updateQueues.push(request.args.request as Record<string, unknown>)
           return { accepted: true }
         }
+        case 'session/page': return { records: [], hasMore: false }
         case 'goals/get': {
           if (request.args.agentId !== 'sess-1') return undefined
           return { ...goal.goal, roundsStarted: goal.roundsStarted, createdAt: goal.createdAt, updatedAt: goal.updatedAt, activation: 'armed' }
@@ -175,8 +191,17 @@ const ctx: HostContext = {
       calls.push(request)
       const endpoint = `${request.namespace}/${request.method}`
       if (endpoint === 'session/follow') {
-        followFeed.push({ type: 'snapshot', header: {}, cursor: 5, records: history, hasMore: false, projections: { asOfSeq: 5, values: {} } })
-        return followFeed
+        const requestArgs = request.args.request as { address?: { kind?: string }; maxMessages?: number }
+        const subagent = requestArgs.address?.kind === 'subagent'
+        // The notification transcript reads a short one-off snapshot; give each read its own feed
+        // so a later turn can be summarized without a previous consumer having closed it.
+        const oneOff = requestArgs.maxMessages === 6
+        const feed = oneOff ? new Feed<Record<string, unknown>>() : subagent ? childFollowFeed : followFeed
+        feed.push({
+          type: 'snapshot', header: {}, cursor: 5, records: snapshotHistory,
+          hasMore: !oneOff && subagent, projections: { asOfSeq: 5, values: {} },
+        })
+        return feed
       }
       const feed = new Feed<unknown>()
       if (endpoint === 'session/control') {
@@ -351,6 +376,23 @@ test('a paired phone drives the Host through the relay', async () => {
   assert.equal(items[3]!.result, 'export function login() {}')
   // Activation is process-local, so opening reads it beside the projection.
   assert.equal(openedValue.session.goal?.activation, 'armed')
+
+  // A subagent conversation opens through its exact parent address, not a plain Session address.
+  const childOpened = await phone.call('session.open', { sessionId: 'sess-sub' })
+  const childValue = childOpened.value as { items: Array<Record<string, unknown>>; session: Record<string, unknown> }
+  assert.equal(childValue.session.parentId, 'sess-1')
+  assert.deepEqual(childValue.items.map(item => item.kind), ['user', 'thinking', 'text', 'tool', 'turn'])
+  const childFollow = calls.findLast(call => call.namespace === 'session' && call.method === 'follow')
+  assert.deepEqual((childFollow!.args.request as { address: unknown }).address, {
+    kind: 'subagent', parentSessionId: 'sess-1', childSessionId: 'sess-sub', mode: 'continuable',
+  })
+  // Older history uses the same durable parent address.
+  const childOlder = await phone.call('session.older', { sessionId: 'sess-sub' })
+  assert.equal(childOlder.ok, true)
+  const childPage = calls.findLast(call => call.namespace === 'session' && call.method === 'page')
+  assert.deepEqual((childPage!.args.request as { address: unknown }).address, {
+    kind: 'subagent', parentSessionId: 'sess-1', childSessionId: 'sess-sub', mode: 'continuable',
+  })
 
   // Live streaming arrives as coalesced deltas.
   followFeed.push({ type: 'assistant-stream', frame: { type: 'start', attemptId: 'att-1', revision: 1, startedAfterSeq: 5, turn: 2, step: 1 } })
@@ -565,6 +607,16 @@ test('a disconnected phone gets an encrypted push from this Mac, not the relay',
   // The working environment is remembered for the next push.
   const devices = JSON.parse(await readFile(join(home, 'duo-remote', 'devices.json'), 'utf8')) as Record<string, { env: string }>
   assert.equal(devices['iphone-duo-1']!.env, 'production')
+
+  // A turn the user stopped ends as `aborted`; it must not become a push.
+  emit('api-session/added', stoppedSummary)
+  const beforeStop = pushes.length
+  snapshotHistory = stoppedHistory
+  emit('api-session/status', 'sess-stop', true)
+  emit('api-session/status', 'sess-stop', false)
+  await new Promise(resolve => setTimeout(resolve, 500))
+  assert.equal(pushes.length, beforeStop, 'a manually stopped turn sends no push')
+  snapshotHistory = history
 })
 
 test('the iPhone page shows phones, the pairing code, and unpairs everyone', async () => {

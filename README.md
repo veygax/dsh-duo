@@ -59,9 +59,10 @@ ciphertext only. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - **Slash commands, listed automatically.** Type `/` (or tap the slash button) to get the session's dsh commands and
   skills, filtered as you type. Commands run on the Host without a model turn.
 - **Notifications.** You're notified when a turn finishes or when DeepSeek asks a question, with inline **Reply** /
-  **Answer** actions. In the foreground these are local notifications for sessions you aren't viewing. When the app
-  is closed, your Mac's dsh plugin sends them through APNs with the push key of the team that signed your copy of the
-  app; the Notification Service Extension decrypts them on the phone. No Apple key ever reaches the shared relay.
+  **Answer** actions. A turn you stop yourself isn't pushed to your phone. In the foreground these are local
+  notifications for sessions you aren't viewing. When the app is closed, your Mac's dsh plugin sends them through APNs
+  with the push key of the team that signed your copy of the app; the Notification Service Extension decrypts them on
+  the phone. No Apple key ever reaches the shared relay.
 - **Questions.** DeepSeek's `ask_user_question` appears as a card above the composer. A single choice answers in one
   tap.
 - **Goals above the composer.** The current objective sits in a compact strip with its phase and round budget, and its

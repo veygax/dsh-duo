@@ -447,16 +447,41 @@ export class Bridge {
       const reply = transcript.lastReply()
       const itemId = transcript.lastReplyItem()?.id
       const title = this.directory.title(sessionId)
-      const body = reason === 'cancelled' ? 'Stopped'
-        : reason === 'error' ? 'The turn ended with an error'
-          : reply === undefined ? 'Finished' : clip(reply.replace(/\s+/g, ' ').trim(), 280)
+      // A manual stop ends the turn with `aborted`; `cancelled` is the older spelling.
+      const stopped = reason === 'aborted' || reason === 'cancelled'
+      const body = stopped ? 'Stopped'
+        : reason === 'interrupted' ? 'Interrupted'
+          : reason === 'max-tokens' ? 'Reached the output limit'
+            : reason === 'blocked' ? 'Blocked'
+              : reason === 'error' ? 'The turn ended with an error'
+                : reply === undefined ? 'Finished' : clip(reply.replace(/\s+/g, ' ').trim(), 280)
       this.broadcast({ ev: 'turn.finished', sessionId, title, summary: body, reason, itemId })
-      this.push({ kind: 'turn', sessionId, title, body, itemId }, { category: 'TURN', thread: sessionId, collapse: `turn-${sessionId}`.slice(0, 64) })
+      // Asking the user to come back for a turn they just stopped is noise.
+      if (!stopped) this.push({ kind: 'turn', sessionId, title, body, itemId }, { category: 'TURN', thread: sessionId, collapse: `turn-${sessionId}`.slice(0, 64) })
     } catch (error) {
       this.log.warn(`duo: could not summarize finished turn: ${String(error)}`)
     } finally {
       this.finishing.delete(sessionId)
     }
+  }
+
+  /**
+   * The address dsh accepts for this Session. A subagent conversation must name its
+   * durable parent and mode; a plain session address is rejected by the Session API.
+   */
+  private addressFor(sessionId: string): Json {
+    const session = this.directory.view(sessionId)
+    if (session?.subagent !== undefined && session.parentId !== undefined) {
+      return {
+        kind: 'subagent',
+        parentSessionId: session.parentId,
+        childSessionId: sessionId,
+        mode: session.subagent.mode === 'one-shot' || session.subagent.mode === 'continuable'
+          ? session.subagent.mode
+          : 'unknown',
+      }
+    }
+    return { kind: 'session', sessionId }
   }
 
   /** The followed transcript, or a short one-off snapshot when nobody is viewing the Session. */
@@ -470,7 +495,7 @@ export class Bridge {
     const controller = new AbortController()
     try {
       const stream = await this.remote.stream<Json>('session/follow', controller.signal, {
-        address: { kind: 'session', sessionId }, maxMessages: 6,
+        address: this.addressFor(sessionId), maxMessages: 6,
       })
       for await (const frame of stream) {
         if (frame.type === 'snapshot') {
@@ -1285,7 +1310,7 @@ export class Bridge {
     follow.older ??= (async () => {
       if (!follow.hasMore || follow.baseSeq === undefined) return { items: [], hasMore: false }
       const page = await this.remote.call<{ records?: unknown[]; hasMore?: boolean }>('session/page', {
-        address: { kind: 'session', sessionId },
+        address: this.addressFor(sessionId),
         throughSeq: follow.cursor,
         beforeSeq: follow.baseSeq,
         maxMessages: 500,
@@ -1326,7 +1351,7 @@ export class Bridge {
       const signal = AbortSignal.any([follow.controller.signal, this.abort.signal])
       try {
         const stream = await this.remote.stream<Json>('session/follow', signal, {
-          address: { kind: 'session', sessionId },
+          address: this.addressFor(sessionId),
           assistantStream: true,
           maxMessages: this.config.historyMessages,
         })

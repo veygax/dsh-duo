@@ -56,9 +56,12 @@ The QR code carries the room secret, so the plugin never writes it into a sessio
   `goal/activation-changed` event so a resumed goal shows as armed on the phone.
 - Follows open sessions with `session/follow` (assistant streams included). It projects the log onto a small item
   vocabulary (user, thinking, text, tool, notice, turn) and coalesces streaming deltas to about 12 frames per second.
+  A delegated conversation is read with the subagent address (`parentSessionId`, `childSessionId`, `mode`), which is
+  what dsh requires for a child Session's history.
 - Holds `user-questions/request` for the phone (prepended, racing any Web client) once a phone has paired, and answers
   continued questions through `userQuestions/answer`.
 - On a running → idle transition, sends `turn.finished` to connected phones and an encrypted push to the others.
+  A manually stopped turn (`aborted`) still updates the transcript but sends no push.
 - Sends push notifications itself, straight to Apple over HTTP/2, to phones that registered a token and aren't
   connected. It uses the key of the team that signed that copy of the app, which `ios/scripts/install.sh --apns-key`
   stores in `$DSH_HOME/duo-remote/apns.json`. The relay never holds Apple credentials.
